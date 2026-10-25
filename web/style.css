@@ -48,3 +48,16 @@ td { padding: 4px 0; border-bottom: 1px solid var(--line); }
 td:last-child { text-align: right; }
 .warn { color: var(--warn); }
 @media (max-width: 480px) { h1 { font-size: 1.5rem; } }
+a { color: var(--accent); }
+.nav { margin: 0 0 8px; font-size: 0.9rem; }
+h3 { font-size: 0.95rem; margin: 8px 0; }
+pre { background: var(--chip); border-radius: 10px; padding: 12px; overflow-x: auto;
+  font-size: 0.8rem; line-height: 1.45; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.keybox { display: flex; gap: 8px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+.keybox code { flex: 1; min-width: 0; overflow-wrap: anywhere; background: var(--chip);
+  padding: 10px 12px; border-radius: 10px; font-size: 0.85rem; }
+.tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+ol { padding-left: 20px; }
+table.ref td { vertical-align: top; text-align: left; padding: 6px 8px 6px 0; }
+table.ref td:first-child { white-space: nowrap; }

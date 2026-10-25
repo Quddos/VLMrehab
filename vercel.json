@@ -1,5 +1,12 @@
 {
   "outputDirectory": "web",
+  "functions": {
+    "api/v1/assess.js": {
+      "memory": 1024,
+      "maxDuration": 30,
+      "includeFiles": "{web/model/**,web/core.mjs,node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.*}"
+    }
+  },
   "headers": [
     {
       "source": "/model/(.*)",

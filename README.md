@@ -13,6 +13,22 @@ photo ──► on-device pose estimation ──► colour-coded skeleton (96×9
                                                 question tokens
 ```
 
+## Use it in your own app (API)
+
+Get a free key at **https://rehabvlm.vercel.app/developers.html**, then send 13 body joints from any tracker:
+
+```bash
+curl https://rehabvlm.vercel.app/api/v1/assess \
+  -H "Authorization: Bearer rvlm_..." -H "Content-Type: application/json" \
+  -d '{"question": "how is my left shoulder?", "joints": {"nose": [0.30, 0.23], "l_shoulder": [0.40, 0.31], ...}}'
+```
+
+The response has the VLM's `answer`, plus `angles_deg` (direct geometry, handy for driving gameplay).
+
+* **Unity / VR:** drop [`web/sdk/unity/RehabVLMClient.cs`](web/sdk/unity/RehabVLMClient.cs) into your project and assign the avatar's Humanoid Animator. It reads the 13 bones, converts them to the avatar's root space and calls the API (`"space": "unity"`).
+* **Web / mobile / Python:** send MediaPipe's 33 pose landmarks as `"mediapipe": [[x, y], ...]`.
+* Keys are HMAC-signed, so no database is needed. Revoke a key by adding its id to the `RVLM_REVOKED_KEYS` env var. Rate limit: 60 requests/min per key (best effort, per server instance).
+
 ---
 
 ## Why a VLM and not an LLM?
@@ -126,5 +142,7 @@ rehabvlm/model.py   TinyVLM (ViT encoder + projector + decoder)
 train.py            training on an endless synthetic stream
 evaluate.py         angle error + exact-match evaluation
 export_onnx.py      ONNX export + demo poses for the web app
-web/                static browser app (index.html, app.js, model/)
+web/                static site: demo (index.html, app.js), developer page, model/, sdk/unity/
+web/core.mjs        pose rasteriser + VLM decoding, shared by the browser and the API
+api/                serverless API: /api/keys, /api/v1/assess, /api/v1/health
 ```

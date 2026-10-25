@@ -24,7 +24,7 @@ def make_batch(rng, tok, n, max_len=64):
         q = tok.encode(QUESTIONS[task])
         a = tok.encode(answer(task, m)) + [EOS]
         seq = [BOS] + q + [SEP] + a
-        lab = [-100] * (len(q) + 1) + a + [-100]   # loss only on the answer
+        lab = [-100] * (len(q) + 2) + a       # loss only on the answer
         seq, lab = seq[:-1], lab[1:]
         pad = max_len - len(seq)
         imgs.append(img)

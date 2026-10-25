@@ -75,7 +75,7 @@ def main():
     ids = torch.tensor([[1] + tok.encode("describe the posture .") + [2]])
     l_onnx = d.run(None, {"img_tokens": m_onnx, "ids": ids.numpy()})[0]
     with torch.no_grad():
-        l_pt = model(x, ids).numpy()
+        l_pt = model(x, ids)[0].numpy()
     print("max |logit diff|:", float(np.abs(l_onnx - l_pt).max()))
 
 

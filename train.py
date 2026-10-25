@@ -1,6 +1,6 @@
 """Train RehabVLM on procedurally generated skeleton images (CPU friendly).
 
-    python train.py --steps 5000
+    python train.py --steps 4000
 """
 import argparse
 import os
@@ -9,7 +9,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from rehabvlm.pose import sample
+from rehabvlm.pose import ANGLE_KEYS, sample
 from rehabvlm.text import QUESTIONS, Tokenizer, answer, PAD, BOS, SEP, EOS
 from rehabvlm.model import TinyVLM
 
@@ -17,7 +17,7 @@ TASKS = list(QUESTIONS)
 
 
 def make_batch(rng, tok, n, max_len=64):
-    imgs, ids, tgt = [], [], []
+    imgs, ids, tgt, ang = [], [], [], []
     for _ in range(n):
         img, m = sample(rng)
         task = TASKS[rng.integers(len(TASKS))]
@@ -28,9 +28,11 @@ def make_batch(rng, tok, n, max_len=64):
         seq, lab = seq[:-1], lab[1:]
         pad = max_len - len(seq)
         imgs.append(img)
+        ang.append([m[k] / 90 for k in ANGLE_KEYS])
         ids.append(seq + [PAD] * pad)
         tgt.append(lab[:len(seq)] + [-100] * pad)
-    return (torch.from_numpy(np.stack(imgs)), torch.tensor(ids), torch.tensor(tgt))
+    return (torch.from_numpy(np.stack(imgs)), torch.tensor(ids), torch.tensor(tgt),
+            torch.tensor(ang, dtype=torch.float32))
 
 
 class Stream(torch.utils.data.IterableDataset):
@@ -49,7 +51,7 @@ class Stream(torch.utils.data.IterableDataset):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--steps", type=int, default=5000)
+    ap.add_argument("--steps", type=int, default=4000)
     ap.add_argument("--batch", type=int, default=64)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--out", default="checkpoints/rehabvlm.pt")
@@ -67,16 +69,19 @@ def main():
 
     t0 = time.time()
     for step in range(1, args.steps + 1):
-        img, ids, tgt = next(loader)
-        logits = model(img, ids)
-        loss = F.cross_entropy(logits.reshape(-1, logits.shape[-1]), tgt.reshape(-1))
+        img, ids, tgt, ang = next(loader)
+        logits, ang_pred = model(img, ids)
+        text_loss = F.cross_entropy(logits.reshape(-1, logits.shape[-1]), tgt.reshape(-1))
+        aux_loss = F.mse_loss(ang_pred, ang)
+        loss = text_loss + aux_loss
         opt.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         opt.step()
         sched.step()
         if step % 100 == 0:
-            print(f"step {step:5d}  loss {loss.item():.4f}  {time.time() - t0:.0f}s", flush=True)
+            print(f"step {step:5d}  text {text_loss.item():.4f}  angles {aux_loss.item():.4f}  "
+                  f"{time.time() - t0:.0f}s", flush=True)
         if step % 1000 == 0 or step == args.steps:
             os.makedirs(os.path.dirname(args.out), exist_ok=True)
             torch.save({"model": model.state_dict(), "vocab": tok.itos}, args.out)

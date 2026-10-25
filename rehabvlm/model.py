@@ -1,4 +1,4 @@
-"""Tiny VLM: ViT image encoder -> linear projector -> causal transformer decoder (prefix-LM).
+"""Tiny VLM: hybrid CNN-ViT image encoder -> linear projector -> causal transformer decoder (prefix-LM).
 
 Attention is written with plain matmuls so the ONNX graphs run in onnxruntime-web.
 """
@@ -38,17 +38,25 @@ class Block(nn.Module):
 
 
 class VisionEncoder(nn.Module):
-    def __init__(self, img=96, patch=12, d=160, layers=4, heads=4):
+    """Hybrid CNN-ViT: a small conv stem (96 -> 12 px grid) feeds 64 tokens to a ViT."""
+
+    def __init__(self, img=96, d=160, layers=4, heads=4):
         super().__init__()
-        self.stem = nn.Sequential(  # small conv stem keeps thin lines visible to the patches
-            nn.Conv2d(3, 32, 3, padding=1), nn.GELU(),
-            nn.Conv2d(32, d, patch, stride=patch))
-        n = (img // patch) ** 2
+
+        def conv(i, o, s):
+            return nn.Sequential(nn.Conv2d(i, o, 3, stride=s, padding=1), nn.BatchNorm2d(o), nn.GELU())
+
+        self.stem = nn.Sequential(conv(5, 32, 2), conv(32, 64, 1),
+                                  conv(64, 96, 2), conv(96, 128, 1), conv(128, d, 2))
+        yy, xx = torch.meshgrid(torch.linspace(-1, 1, img), torch.linspace(-1, 1, img), indexing="ij")
+        self.register_buffer("coords", torch.stack([xx, yy])[None], persistent=False)  # CoordConv
+        n = (img // 8) ** 2
         self.pos = nn.Parameter(torch.randn(1, n, d) * 0.02)
         self.blocks = nn.ModuleList(Block(d, heads) for _ in range(layers))
         self.norm = nn.LayerNorm(d)
 
     def forward(self, x):
+        x = torch.cat([x, self.coords.expand(x.shape[0], -1, -1, -1)], 1)
         x = self.stem(x).flatten(2).transpose(1, 2) + self.pos
         for b in self.blocks:
             x = b(x)
@@ -66,6 +74,7 @@ class TinyVLM(nn.Module):
         self.norm = nn.LayerNorm(d)
         self.head = nn.Linear(d, vocab, bias=False)
         self.head.weight = self.tok.weight
+        self.angle_head = nn.Linear(d, 7)   # auxiliary training signal for the encoder only
 
     def encode_image(self, img):
         return self.project(self.encoder(img))
@@ -84,7 +93,8 @@ class TinyVLM(nn.Module):
         return self.head(self.norm(x[:, N:]))
 
     def forward(self, img, ids):
-        return self.decode(self.encode_image(img), ids)
+        feats = self.encoder(img)
+        return self.decode(self.project(feats), ids), self.angle_head(feats.mean(1))
 
     @torch.no_grad()
     def generate(self, img, prompt_ids, eos, max_new=60):

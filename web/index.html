@@ -11,7 +11,7 @@
 <body>
 <header>
   <h1>RehabVLM</h1>
-  <p class="sub">A 3.3M-parameter vision-language model for motor function and range-of-motion assessment. It runs entirely in your browser, so your photo never leaves the device.</p>
+  <p class="sub">A 3M-parameter vision-language model for motor function and range-of-motion assessment. It runs entirely in your browser, so your photo never leaves the device.</p>
 </header>
 
 <main>
@@ -50,7 +50,7 @@
 
   <section class="card small">
     <h2>About</h2>
-    <p>Architecture: ViT image encoder → projector → causal transformer decoder (LLaVA-style prefix-LM), trained from scratch on procedurally generated skeletons. Real photos go through on-device pose estimation (MediaPipe) and are drawn as the same colour-coded skeleton before the VLM reads them. <b>Red</b> = subject's right, <b>green</b> = left, <b>blue</b> = trunk.</p>
+    <p>Architecture: CNN-ViT image encoder (with CoordConv) → projector → causal transformer decoder (LLaVA-style prefix-LM), trained from scratch on procedurally generated skeletons. Real photos go through on-device pose estimation (MediaPipe) and are drawn as the same colour-coded skeleton before the VLM reads them. <b>Red</b> = subject's right, <b>green</b> = left, <b>blue</b> = trunk.</p>
     <p class="warn">Research and education demo, not a medical device. Do not use it for diagnosis or treatment decisions.</p>
   </section>
 </main>

@@ -1,6 +1,6 @@
 # RehabVLM
 
-A **tiny vision-language model (3.3M parameters)** for motor function and range-of-motion (ROM) assessment in rehabilitation. You show it a body pose, ask a question in plain language, and it answers with joint angles, grades, left/right asymmetry and simple exercise suggestions.
+A **tiny vision-language model (3M parameters)** for motor function and range-of-motion (ROM) assessment in rehabilitation. You show it a body pose, ask a question in plain language, and it answers with joint angles, grades, left/right asymmetry and simple exercise suggestions.
 
 It runs **fully in the browser** (ONNX Runtime Web + MediaPipe), so a patient's photo never leaves their phone, and the whole thing is hosted for free as a static site.
 
@@ -8,7 +8,7 @@ It runs **fully in the browser** (ONNX Runtime Web + MediaPipe), so a patient's 
 
 ```
 photo ──► on-device pose estimation ──► colour-coded skeleton (96×96) ──► RehabVLM ──► "right shoulder abduction 60 degrees, limited ..."
-                (MediaPipe)                (red = right, green = left)      (ViT → projector → decoder)
+                (MediaPipe)                (red = right, green = left)      (CNN-ViT → projector → decoder)
                                                        ▲
                                                 question tokens
 ```
@@ -23,7 +23,7 @@ photo ──► on-device pose estimation ──► colour-coded skeleton (96×9
 2. **Grounded, not self-reported.** An LLM can only work from what the patient says ("I can't lift my arm very high"), which is subjective and easy to hallucinate on. A VLM's answer is conditioned on pixels, so "60 degrees" comes from the actual pose in front of it.
 3. **One model, many questions.** A plain vision model (classifier or regressor) has a fixed output, for example 6 numbers. A VLM takes a *question* along with the image and generates a *natural-language* answer: "assess the shoulders", "which side is weaker?", "suggest exercises". New assessment questions are new training text, not a new architecture. The answer is also readable by patients and clinicians directly.
 4. **It scales to what rules can't easily capture.** For a single joint angle, geometry on keypoints is enough (the demo shows that check side by side). The point of the VLM design is the path forward: compensation patterns (shoulder hiking, trunk lean while reaching), movement quality across video frames, and assistive-device use. These are visual patterns that are hard to hand-code but learnable from images plus text.
-5. **Small enough for the edge.** At 3.3M parameters (about 13 MB), it runs on a phone in the browser. That makes it private and free to host, and it works in a clinic, a home or a low-resource setting.
+5. **Small enough for the edge.** At 3M parameters (about 12 MB), it runs on a phone in the browser. That makes it private and free to host, and it works in a clinic, a home or a low-resource setting.
 
 **One-line version:** *an LLM needs someone to describe the patient; a VLM looks at the patient.*
 
@@ -50,11 +50,19 @@ LLaVA-style prefix-LM, trained from scratch:
 
 | Part | Details |
 |---|---|
-| Vision encoder | conv stem + 12×12 patches → 64 image tokens, 4-layer ViT, d=160 |
+| Vision encoder | CNN stem with CoordConv (x/y coordinate channels) → 12×12 grid = 144 image tokens, 4-layer ViT, d=160 |
 | Projector | 2-layer MLP into the language space |
 | Language decoder | 4-layer transformer, 118-word vocabulary (angles are tokens in 5° steps) |
 | Attention | image tokens attend to each other bidirectionally; text tokens attend causally to image + previous text |
-| Size | 3.31M parameters, about 13 MB as ONNX |
+| Training loss | next-token cross-entropy on the answer + auxiliary joint-angle regression on the image features |
+| Size | 2.96M parameters, about 12 MB as ONNX |
+
+### What we learned building it
+
+The first version used a plain patch-ViT encoder. It learned fluent answers but **ignored the image**: angle errors were at chance level (~59°), because the decoder fell back on a language-only prior. Two changes fixed this:
+
+* **CoordConv + CNN stem.** Feeding x/y coordinate maps lets the encoder localise thin skeleton lines. Angle regression error fell from ~30° to ~8° within 300 steps.
+* **Auxiliary angle loss.** A small head regresses the 7 joint angles from the image tokens, which forces the encoder to learn geometry that the decoder can then put into words.
 
 ## Data
 
@@ -76,7 +84,7 @@ RESULTS_PLACEHOLDER
 
 ```bash
 pip install -r requirements.txt
-python train.py --steps 5000          # ~80 min on a 4-core CPU
+python train.py --steps 4000          # ~2 h on a 4-core CPU
 python evaluate.py --n 300
 python export_onnx.py                 # writes web/model/{encoder,decoder}.onnx + vocab
 cd web && python -m http.server 8000  # open http://localhost:8000

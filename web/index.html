@@ -12,24 +12,28 @@
 <header>
   <p class="nav"><a href="developers.html">API for developers →</a></p>
   <h1>RehabVLM</h1>
-  <p class="sub">A 3M-parameter vision-language model for motor function and range-of-motion assessment. It runs entirely in your browser, so your photo never leaves the device.</p>
+  <p class="sub">Tiny 3M-parameter vision-language models for motor function and range-of-motion assessment of the body and the hand. They run entirely in your browser, so your photo never leaves the device.</p>
 </header>
 
 <main>
   <section class="card">
-    <h2>1 · Pose</h2>
-    <p class="hint">Stand facing the camera with your whole body in frame, then raise both arms out to the side as far as you comfortably can.</p>
+    <div class="mode" role="tablist">
+      <button id="mode-body" class="on">Body</button>
+      <button id="mode-hand">Hand</button>
+    </div>
+    <h2 id="step1">1 · Pose</h2>
+    <p id="instructions" class="hint"></p>
     <div class="row">
       <label class="btn primary">Take / upload photo
         <input id="file" type="file" accept="image/*" capture="environment" hidden>
       </label>
       <label class="check"><input id="mirror" type="checkbox"> Mirrored selfie</label>
     </div>
-    <p class="hint">Or try an example patient:</p>
+    <p class="hint">Or try an example:</p>
     <div id="demos" class="chips"></div>
     <div class="views">
       <figure><canvas id="photo" width="320" height="320"></canvas><figcaption>Input + landmarks</figcaption></figure>
-      <figure><canvas id="skeleton" width="192" height="192"></canvas><figcaption>What the VLM sees (96×96)</figcaption></figure>
+      <figure><canvas id="skeleton" width="192" height="192"></canvas><figcaption id="seecap">What the VLM sees (96×96)</figcaption></figure>
     </div>
     <p id="status" class="status">Loading model…</p>
   </section>
@@ -38,20 +42,20 @@
     <h2>2 · Ask</h2>
     <div id="questions" class="chips"></div>
     <form id="askform" class="row">
-      <input id="ask" type="text" placeholder="e.g. how is my right shoulder?" autocomplete="off">
+      <input id="ask" type="text" placeholder="Ask a question" autocomplete="off">
       <button class="btn primary" type="submit">Ask</button>
     </form>
     <div id="answer" class="answer" aria-live="polite"></div>
     <details>
       <summary>Check against direct geometry</summary>
-      <p class="hint">Angles computed straight from the landmarks, to compare with what the VLM read from pixels.</p>
+      <p class="hint">Measurements computed straight from the landmarks, to compare with what the VLM read from pixels.</p>
       <table id="geom"></table>
     </details>
   </section>
 
   <section class="card small">
     <h2>About</h2>
-    <p>Architecture: CNN-ViT image encoder (with CoordConv) → projector → causal transformer decoder (LLaVA-style prefix-LM), trained from scratch on procedurally generated skeletons. Real photos go through on-device pose estimation (MediaPipe) and are drawn as the same colour-coded skeleton before the VLM reads them. <b>Red</b> = subject's right, <b>green</b> = left, <b>blue</b> = trunk.</p>
+    <p>Architecture: CNN-ViT image encoder (with CoordConv) → projector → causal transformer decoder (LLaVA-style prefix-LM), trained from scratch on procedurally generated skeletons. Real photos go through on-device pose estimation (MediaPipe) and are drawn as the same colour-coded skeleton before the VLM reads them. Body skeleton: <b>red</b> = subject's right, <b>green</b> = left, <b>blue</b> = trunk. Hands are put into a standard orientation and drawn from three sides (red = front, green = side, blue = top), so the model can read finger curl in 3D.</p>
     <p class="warn">Research and education demo, not a medical device. Do not use it for diagnosis or treatment decisions.</p>
   </section>
 </main>

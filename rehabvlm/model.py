@@ -64,7 +64,7 @@ class VisionEncoder(nn.Module):
 
 
 class TinyVLM(nn.Module):
-    def __init__(self, vocab, d=160, enc_layers=4, dec_layers=4, heads=4, max_len=96):
+    def __init__(self, vocab, d=160, enc_layers=4, dec_layers=4, heads=4, max_len=96, n_targets=7):
         super().__init__()
         self.encoder = VisionEncoder(d=d, layers=enc_layers, heads=heads)
         self.project = nn.Sequential(nn.Linear(d, d), nn.GELU(), nn.Linear(d, d))
@@ -74,7 +74,7 @@ class TinyVLM(nn.Module):
         self.norm = nn.LayerNorm(d)
         self.head = nn.Linear(d, vocab, bias=False)
         self.head.weight = self.tok.weight
-        self.angle_head = nn.Linear(d, 7)   # auxiliary training signal for the encoder only
+        self.angle_head = nn.Linear(d, n_targets)   # auxiliary training signal for the encoder only
 
     def encode_image(self, img):
         return self.project(self.encoder(img))

@@ -3,6 +3,7 @@
 
 export const IMG = 96;
 export const MODEL_VERSION = "rehabvlm-body-0.1";
+export const HAND_MODEL_VERSION = "rehabvlm-hand-0.1";
 
 export const QUESTIONS = {
   describe: ["Describe posture", "describe the posture ."],
@@ -22,11 +23,28 @@ const ROUTES = [
   [/shoulder|arm|raise|lift|reach|abduct/, "shoulders"],
 ];
 
+export const HAND_QUESTIONS = {
+  describe: ["Describe hand", "describe the hand ."],
+  fist: ["Fist", "assess the fist ."],
+  pinch: ["Pinch", "assess the pinch ."],
+  limited: ["Most limited finger?", "which finger is most limited ?"],
+  spread: ["Finger spread", "check finger spread ."],
+  exercise: ["Suggest exercises", "suggest hand exercises ."],
+};
+const HAND_ROUTES = [
+  [/exercis|rehab|therap|improve|help|train|workout|stretch/, "exercise"],
+  [/pinch|grasp small|thumb.*index|index.*thumb|pick/, "pinch"],
+  [/spread|apart|fan|abduct/, "spread"],
+  [/limit|stiff|weak|worst|which finger|least/, "limited"],
+  [/fist|grip|close|squeeze|curl|grab/, "fist"],
+];
+
 /** Map a free-text question (or a task name) to one of the supported tasks. */
-export function routeQuestion(q) {
+export function routeQuestion(q, domain = "body") {
+  const [questions, routes] = domain === "hand" ? [HAND_QUESTIONS, HAND_ROUTES] : [QUESTIONS, ROUTES];
   q = String(q || "").toLowerCase().trim();
-  if (q in QUESTIONS) return q;
-  return (ROUTES.find(([re]) => re.test(q)) || [null, "describe"])[1];
+  if (q in questions) return q;
+  return (routes.find(([re]) => re.test(q)) || [null, "describe"])[1];
 }
 
 export const KP = ["nose", "l_shoulder", "r_shoulder", "l_elbow", "r_elbow", "l_wrist", "r_wrist",
@@ -60,26 +78,27 @@ export function normalise(k, size = IMG, margin = 0.1) {
   return pts.map((p) => [(p[0] - c[0]) * scale + size / 2, (p[1] - c[1]) * scale + size / 2]);
 }
 
-export function rasterise(pts, width = 2.2, size = IMG) {
-  const img = new Float32Array(3 * size * size);
-  const ink = (ch, dist, x, y) => {
-    const v = Math.min(1, Math.max(0, width / 2 + 0.5 - dist));
+// Max-blend an anti-aliased segment p-q of the given width into channel ch.
+function inkSegment(img, ch, p, q, width, size) {
+  const dx = q[0] - p[0], dy = q[1] - p[1];
+  const L2 = dx * dx + dy * dy + 1e-9;
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const px = x + 0.5, py = y + 0.5;
+    const t = Math.min(1, Math.max(0, ((px - p[0]) * dx + (py - p[1]) * dy) / L2));
+    const v = Math.min(1, Math.max(0, width / 2 + 0.5 - Math.hypot(px - (p[0] + t * dx), py - (p[1] + t * dy))));
     const i = ch * size * size + y * size + x;
     if (v > img[i]) img[i] = v;
-  };
-  for (const [a, b, ch] of SEGMENTS) {
-    const p = pts[IDX[a]], q = pts[IDX[b]];
-    const dx = q[0] - p[0], dy = q[1] - p[1];
-    const L2 = dx * dx + dy * dy + 1e-9;
-    for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
-      const px = x + 0.5, py = y + 0.5;
-      const t = Math.min(1, Math.max(0, ((px - p[0]) * dx + (py - p[1]) * dy) / L2));
-      ink(ch, Math.hypot(px - (p[0] + t * dx), py - (p[1] + t * dy)), x, y);
-    }
   }
+}
+
+export function rasterise(pts, width = 2.2, size = IMG) {
+  const img = new Float32Array(3 * size * size);
+  for (const [a, b, ch] of SEGMENTS) inkSegment(img, ch, pts[IDX[a]], pts[IDX[b]], width, size);
   const n = pts[IDX.nose], r = 0.06 * size;
   for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
-    ink(2, Math.abs(Math.hypot(x + 0.5 - n[0], y + 0.5 - n[1]) - r), x, y);
+    const v = Math.min(1, Math.max(0, width / 2 + 0.5 - Math.abs(Math.hypot(x + 0.5 - n[0], y + 0.5 - n[1]) - r)));
+    const i = 2 * size * size + y * size + x;
+    if (v > img[i]) img[i] = v;
   }
   return img;
 }
@@ -107,17 +126,24 @@ export function measure(k) {
 
 // ---------- model ----------
 /** Load both ONNX graphs. `load(path)` returns what ort.InferenceSession.create accepts. */
-export async function loadModel(ort, vocabJson, load) {
+export async function loadModel(ort, vocabJson, load, questions = QUESTIONS) {
   const vocab = vocabJson.vocab;
   const [encoder, decoder] = await Promise.all([
     ort.InferenceSession.create(await load("encoder.onnx")),
     ort.InferenceSession.create(await load("decoder.onnx")),
   ]);
-  return { ort, vocab, stoi: Object.fromEntries(vocab.map((w, i) => [w, i])), encoder, decoder };
+  return { ort, vocab, questions, stoi: Object.fromEntries(vocab.map((w, i) => [w, i])), encoder, decoder };
 }
 
 export async function encodePose(model, kps) {
-  const pixels = rasterise(normalise(kps));
+  return encodePixels(model, rasterise(normalise(kps)));
+}
+
+export async function encodeHand(model, landmarks) {
+  return encodePixels(model, rasteriseHand(canonicaliseHand(landmarks)));
+}
+
+async function encodePixels(model, pixels) {
   const { img_tokens } = await model.encoder.run({
     image: new model.ort.Tensor("float32", pixels, [1, 3, IMG, IMG]),
   });
@@ -127,7 +153,7 @@ export async function encodePose(model, kps) {
 /** Greedy decoding. Returns the answer, or null if shouldStop() turned true. */
 export async function generate(model, mem, task, { onToken, shouldStop } = {}) {
   const { ort, stoi, decoder } = model;
-  const prompt = [BOS, ...QUESTIONS[task][1].split(" ").map((w) => stoi[w]), SEP];
+  const prompt = [BOS, ...model.questions[task][1].split(" ").map((w) => stoi[w]), SEP];
   const ids = [...prompt];
   for (let step = 0; step < 64; step++) {
     if (shouldStop && shouldStop()) return null;
@@ -149,6 +175,68 @@ export function pretty(vocab, ids) {
   const s = ids.filter((i) => i > 4).map((i) => vocab[i]).join(" ")
     .replace(/ \./g, ".").replace(/ ,/g, ",").replace(/ \?/g, "?");
   return s.replace(/(^|\. )([a-z])/g, (m, p, c) => p + c.toUpperCase());
+}
+
+// ---------- hands (mirrors rehabvlm/hand.py) ----------
+// 21 landmarks, MediaPipe Hands order: 0 wrist; thumb 1-4; index 5-8; middle 9-12; ring 13-16; pinky 17-20
+export const HAND_FINGERS = ["thumb", "index", "middle", "ring", "pinky"];
+const HAND_CHAINS = [[0, 1, 2, 3, 4], [0, 5, 6, 7, 8], [0, 9, 10, 11, 12], [0, 13, 14, 15, 16], [0, 17, 18, 19, 20]];
+export const HAND_SEGMENTS = [
+  ...HAND_CHAINS.flatMap((c) => [0, 1, 2, 3].map((i) => [c[i], c[i + 1]])), [5, 9], [9, 13], [13, 17],
+];
+const HAND_VIEWS = [[0, 1, 0.0, 1.0], [2, 1, 0.3, 1.0], [0, 2, 0.0, 0.3]];   // front, side, top
+const HAND_PX = 36;
+
+const v3 = {
+  sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]],
+  dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2],
+  scale: (a, s) => [a[0] * s, a[1] * s, a[2] * s],
+  cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]],
+  norm: (a) => Math.hypot(a[0], a[1], a[2]),
+};
+const unit = (a) => v3.scale(a, 1 / (v3.norm(a) + 1e-9));
+const ang3 = (a, b) =>
+  Math.acos(Math.max(-1, Math.min(1, v3.dot(a, b) / (v3.norm(a) * v3.norm(b) + 1e-9)))) * 180 / Math.PI;
+
+export function canonicaliseHand(k) {
+  k = k.map((p) => v3.sub(p, k[0]));
+  const y = unit(k[9]);
+  const xt = v3.sub(k[5], k[17]);
+  const x = unit(v3.sub(xt, v3.scale(y, v3.dot(xt, y))));
+  const z = v3.cross(x, y);
+  const s = 1 / (v3.norm(k[9]) + 1e-9);
+  return k.map((p) => [v3.dot(p, x) * s, v3.dot(p, y) * s, v3.dot(p, z) * s]);
+}
+
+export function rasteriseHand(c, width = 2.0, size = IMG) {
+  const img = new Float32Array(3 * size * size);
+  HAND_VIEWS.forEach(([u, v, cu, cv], ch) => {
+    const pts = c.map((p) => [(p[u] - cu) * HAND_PX + size / 2, size / 2 - (p[v] - cv) * HAND_PX]);
+    for (const [a, b] of HAND_SEGMENTS) inkSegment(img, ch, pts[a], pts[b], width, size);
+    for (const tip of [4, 8, 12, 16, 20]) inkSegment(img, ch, pts[tip], pts[tip], 2 * width, size);
+  });
+  return img;
+}
+
+/** Rotation-invariant finger measurements (same keys as rehabvlm/hand.py). */
+export function measureHand(k) {
+  const normal = unit(v3.cross(v3.sub(k[5], k[0]), v3.sub(k[17], k[0])));
+  const out = {};
+  HAND_FINGERS.forEach((name, f) => {
+    const c = HAND_CHAINS[f];
+    const segs = [0, 1, 2, 3].map((i) => v3.sub(k[c[i + 1]], k[c[i]]));
+    let total = ang3(segs[1], segs[2]) + ang3(segs[2], segs[3]);
+    if (name !== "thumb") {
+      total += Math.asin(Math.min(1, Math.abs(v3.dot(unit(segs[1]), normal)))) * 180 / Math.PI;
+    }
+    out[`${name}_flex`] = total;
+  });
+  const proj = (v) => v3.sub(v, v3.scale(normal, v3.dot(v, normal)));
+  const a = v3.sub(k[6], k[5]), b = v3.sub(k[18], k[17]);
+  const flat = Math.min(v3.norm(proj(a)) / v3.norm(a), v3.norm(proj(b)) / v3.norm(b));
+  out.spread = flat > 0.7 ? ang3(proj(a), proj(b)) : null;   // not measurable while fingers are curled
+  out.pinch_gap = 100 * v3.norm(v3.sub(k[4], k[8])) / (v3.norm(v3.sub(k[5], k[17])) + 1e-9);
+  return out;
 }
 
 // ---------- input adapters (used by the API) ----------
@@ -179,4 +267,20 @@ export function keypointsFromInput(body) {
     return body.space === "unity" ? [-p[0], -p[1]] : [p[0], p[1]];
   });
   return kps;
+}
+
+/**
+ * Hand input: { hand: [[x, y, z], ... 21 landmarks in MediaPipe order], space?: "image" | "unity" }.
+ * Any orientation, scale or units work; only the hand's shape matters. Unity (left-handed axes) is
+ * converted by flipping z.
+ */
+export function handFromInput(body) {
+  const h = body.hand;
+  if (!Array.isArray(h) || h.length !== 21) throw new Error("`hand` must be 21 landmarks [x, y, z]");
+  return h.map((p) => {
+    if (!Array.isArray(p) || p.length < 3 || !p.slice(0, 3).every(Number.isFinite)) {
+      throw new Error("each hand landmark needs [x, y, z], got " + JSON.stringify(p));
+    }
+    return body.space === "unity" ? [p[0], p[1], -p[2]] : [p[0], p[1], p[2]];
+  });
 }

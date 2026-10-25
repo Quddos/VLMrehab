@@ -1,12 +1,14 @@
 """Export the trained model to two ONNX graphs + vocab for the browser demo."""
 import argparse
 import json
+import os
 import numpy as np
 import onnxruntime as ort
 import torch
 
 from evaluate import load
-from rehabvlm.pose import KP, MP_INDEX, sample, synth_keypoints
+from rehabvlm.domains import DOMAINS
+from rehabvlm.pose import KP, MP_INDEX, synth_keypoints
 
 # example patients for the demo page (target angles: [right, left])
 DEMOS = {
@@ -46,12 +48,41 @@ class Dec(torch.nn.Module):
         return self.m.decode(img_tokens, ids)
 
 
+HAND_DEMOS = {   # (MCP, PIP, DIP) per finger, thumb, spread
+    "Open hand": ({f: [5, 5, 3] for f in ("index", "middle", "ring", "pinky")},
+                  dict(opp=0.1, mcp=5, ip=5), 30.0),
+    "Full fist": ({f: [85, 100, 70] for f in ("index", "middle", "ring", "pinky")},
+                  dict(opp=0.8, mcp=45, ip=50), 0.0),
+    "Stiff ring finger": ({**{f: [80, 100, 70] for f in ("index", "middle", "pinky")}, "ring": [15, 20, 10]},
+                          dict(opp=0.8, mcp=40, ip=45), 0.0),
+    "Weak grip (stroke)": ({f: [35, 45, 25] for f in ("index", "middle", "ring", "pinky")},
+                           dict(opp=0.4, mcp=20, ip=15), 5.0),
+    "Pinch": ({"index": [45, 70, 20], "middle": [30, 40, 20], "ring": [35, 45, 25], "pinky": [40, 50, 30]},
+              dict(opp=0.7, mcp=10, ip=30), 5.0),
+}
+
+
+def demo_hands():
+    from rehabvlm.hand import synth_canonical
+    rng = np.random.default_rng(3)
+    tilt = np.array([[1, 0, 0], [0, np.cos(0.3), -np.sin(0.3)], [0, np.sin(0.3), np.cos(0.3)]])
+    out = {}
+    for name, (f, thumb, spread) in HAND_DEMOS.items():
+        k = synth_canonical(rng, ({n: np.array(v, float) for n, v in f.items()}, thumb, spread))
+        k = (k @ tilt.T) * np.array([1, -1, 1]) * 0.09     # metres, y down like MediaPipe
+        out[name] = np.round(k, 5).tolist()
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ckpt", default="checkpoints/rehabvlm.pt")
-    ap.add_argument("--out", default="web/model")
+    ap.add_argument("--out", default=None, help="default: web/model (body) or web/model/hand")
     args = ap.parse_args()
-    model, tok = load(args.ckpt)
+    model, tok, domain = load(args.ckpt)
+    args.out = args.out or ("web/model" if domain == "body" else "web/model/hand")
+    os.makedirs(args.out, exist_ok=True)
+    dom = DOMAINS[domain]
 
     img = torch.zeros(1, 3, 96, 96)
     mem = model.encode_image(img)
@@ -63,16 +94,19 @@ def main():
                       dynamic_axes={"ids": {1: "T"}, "logits": {1: "T"}},
                       opset_version=17, dynamo=False)
     with open(f"{args.out}/vocab.json", "w") as f:
-        json.dump({"vocab": tok.itos, "keypoints": KP, "mediapipe_index": MP_INDEX}, f)
-    with open(f"{args.out}/demo_poses.json", "w") as f:
-        json.dump(demo_poses(), f)
+        if domain == "body":
+            json.dump({"vocab": tok.itos, "keypoints": KP, "mediapipe_index": MP_INDEX}, f)
+        else:
+            json.dump({"vocab": tok.itos, "landmarks": 21}, f)
+    with open(f"{args.out}/{'demo_poses' if domain == 'body' else 'demo_hands'}.json", "w") as f:
+        json.dump(demo_poses() if domain == "body" else demo_hands(), f)
 
     # parity check against PyTorch on a random sample
-    x = torch.from_numpy(sample(np.random.default_rng(0))[0])[None]
+    x = torch.from_numpy(dom.sample(np.random.default_rng(0))[0])[None]
     e = ort.InferenceSession(f"{args.out}/encoder.onnx")
     d = ort.InferenceSession(f"{args.out}/decoder.onnx")
     m_onnx = e.run(None, {"image": x.numpy()})[0]
-    ids = torch.tensor([[1] + tok.encode("describe the posture .") + [2]])
+    ids = torch.tensor([[1] + tok.encode(dom.questions["describe"]) + [2]])
     l_onnx = d.run(None, {"img_tokens": m_onnx, "ids": ids.numpy()})[0]
     with torch.no_grad():
         l_pt = model(x, ids)[0].numpy()

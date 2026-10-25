@@ -4,34 +4,39 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>RehabVLM API</title>
-  <meta name="description" content="Get a free API key and add range-of-motion assessment to your Unity, VR, web or mobile app.">
+  <meta name="description" content="Get a free API key and add body and hand range-of-motion assessment to your Unity, VR, web or mobile app.">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header>
   <p class="nav"><a href="./">← Demo</a></p>
   <h1>RehabVLM API</h1>
-  <p class="sub">Send body joint positions from any camera or tracking system (Unity / VR body tracking, MediaPipe, Kinect, mocap) and get a range-of-motion assessment back in plain language and degrees.</p>
+  <p class="sub">Send body joints or hand landmarks from any camera or tracker (Unity / VR body and hand tracking, MediaPipe, Kinect, mocap) and get a range-of-motion assessment back, in plain language and in degrees.</p>
 </header>
 
 <main>
   <section class="card">
     <h2>1 · Get an API key</h2>
-    <p class="hint">Free, instant, no sign-up. Store it like a password. Limit: 60 requests per minute per key.</p>
+    <p class="hint">Free, instant, no sign-up. Limit: 60 requests per minute per key.</p>
     <div class="row">
       <button id="getkey" class="btn primary">Generate API key</button>
     </div>
-    <div id="keybox" class="keybox" hidden>
-      <code id="key"></code>
-      <button id="copy" class="btn">Copy</button>
+    <div id="keyout" hidden>
+      <p class="label">API key</p>
+      <div class="keybox"><code id="key"></code><button class="btn copy" data-copy="key">Copy</button></div>
+      <p class="label">Environment variable: paste into your <code>.env</code> file or your host's env settings</p>
+      <div class="keybox"><code id="envline"></code><button class="btn copy" data-copy="envline">Copy</button></div>
+      <p class="hint">Works with Vercel, Netlify, Render, GitHub Actions secrets, Docker <code>--env-file</code>, and Unity (see below). Keep <code>.env</code> out of git.</p>
     </div>
     <p id="keymsg" class="status"></p>
   </section>
 
   <section class="card">
     <h2>2 · Call the API</h2>
+    <p class="hint">Every sample reads the key from <code>REHABVLM_API_KEY</code>, so your code never contains it.</p>
     <div class="tabs" role="tablist">
-      <button class="chip on" data-tab="unity">Unity / VR</button>
+      <button class="chip on" data-tab="unity">Unity body</button>
+      <button class="chip" data-tab="hands">Unity hands</button>
       <button class="chip" data-tab="curl">cURL</button>
       <button class="chip" data-tab="js">JavaScript</button>
       <button class="chip" data-tab="py">Python</button>
@@ -40,19 +45,36 @@
     <div class="tab" id="tab-unity">
       <ol>
         <li>Download <a href="sdk/unity/RehabVLMClient.cs" download>RehabVLMClient.cs</a> (and optionally <a href="sdk/unity/RehabVLMExample.cs" download>RehabVLMExample.cs</a>) into <code>Assets/</code>.</li>
-        <li>Add <b>RehabVLMClient</b> to a GameObject, paste your key, and drag in the <b>Humanoid Animator</b> of the tracked avatar (Meta Movement SDK, VRIK, Kinect, any pose-driven rig).</li>
-        <li>Ask a question from code:</li>
+        <li>Provide the key. Create <code>Assets/Resources/rehabvlm_env.txt</code> containing the environment-variable line above (this works on Quest, Android and iOS too), or set <code>REHABVLM_API_KEY</code> in your environment for editor and desktop builds. Add the file to <code>.gitignore</code>.</li>
+        <li>Add <b>RehabVLMClient</b> to a GameObject and drag in the <b>Humanoid Animator</b> of the tracked avatar (Meta Movement SDK, VRIK, Kinect, any pose-driven rig).</li>
       </ol>
 <pre><code>client.Assess("how is my left shoulder?", r =&gt; {
-    feedbackText.text = r.answer;                 // "Left shoulder abduction 85 degrees, limited. ..."
+    feedbackText.text = r.answer;                    // "Left shoulder abduction 85 degrees, limited. ..."
     if (r.angles_deg.l_shoulder_abd &gt; 120) Reward(); // drive gameplay with the numbers
 });</code></pre>
-      <p class="hint">The client sends 13 joints in the avatar's root space (<code>"space": "unity"</code>, Y up, facing +Z), so the result doesn't depend on where the player stands in the room.</p>
+    </div>
+
+    <div class="tab" id="tab-hands" hidden>
+      <ol>
+        <li>Install the <b>XR Hands</b> package (<code>com.unity.xr.hands</code>). It works with Meta Quest, Pico, Apple Vision Pro, Ultraleap and other OpenXR hand tracking.</li>
+        <li>Download <a href="sdk/unity/RehabVLMClient.cs" download>RehabVLMClient.cs</a> and <a href="sdk/unity/RehabVLMHandClient.cs" download>RehabVLMHandClient.cs</a> into <code>Assets/</code>, and provide the key as in "Unity body".</li>
+        <li>Add <b>RehabVLMHandClient</b> to a GameObject, pick the hand, and ask:</li>
+      </ol>
+<pre><code>handClient.Assess("make a fist", r =&gt; {
+    label.text = r.answer;   // "Average finger flexion 160 degrees, partial fist. Least flexed is the ring finger ..."
+    if (r.measurements.pinch_gap &lt; 25) OnPinchSuccess();
+});
+
+// Webcam hand tracker instead of XR? Send its 21 landmarks (MediaPipe order):
+handClient.AssessLandmarks(points, "assess the pinch", r =&gt; Debug.Log(r.answer));</code></pre>
     </div>
 
     <div class="tab" id="tab-curl" hidden>
-<pre><code>curl https://rehabvlm.vercel.app/api/v1/assess \
-  -H "Authorization: Bearer <span class="k">YOUR_KEY</span>" \
+<pre><code># .env  →  REHABVLM_API_KEY=rvlm_...
+export $(grep REHABVLM_API_KEY .env)
+
+curl https://rehabvlm.vercel.app/api/v1/assess \
+  -H "Authorization: Bearer $REHABVLM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "question": "which side is weaker?",
@@ -67,26 +89,35 @@
     </div>
 
     <div class="tab" id="tab-js" hidden>
-<pre><code>// landmarks = MediaPipe PoseLandmarker result.landmarks[0] (33 points)
+<pre><code>// Server side (Node, Next.js API route, ...). Never ship the key to browsers.
+// Body: MediaPipe PoseLandmarker landmarks (33 points)
 const res = await fetch("https://rehabvlm.vercel.app/api/v1/assess", {
   method: "POST",
-  headers: { "Authorization": "Bearer <span class="k">YOUR_KEY</span>", "Content-Type": "application/json" },
+  headers: {
+    "Authorization": `Bearer ${process.env.REHABVLM_API_KEY}`,
+    "Content-Type": "application/json",
+  },
   body: JSON.stringify({
-    mediapipe: landmarks.map(p =&gt; [p.x * width, p.y * height]),
+    mediapipe: pose.landmarks[0].map(p =&gt; [p.x * width, p.y * height]),
     tasks: ["shoulders", "exercise"],
   }),
 });
-const { answers, angles_deg } = await res.json();</code></pre>
+
+// Hand: MediaPipe HandLandmarker worldLandmarks (21 points, metres)
+body: JSON.stringify({
+  hand: result.worldLandmarks[0].map(p =&gt; [p.x, p.y, p.z]),
+  question: "assess the fist",
+})</code></pre>
     </div>
 
     <div class="tab" id="tab-py" hidden>
-<pre><code>import requests
+<pre><code>import os, requests
 
 r = requests.post(
     "https://rehabvlm.vercel.app/api/v1/assess",
-    headers={"Authorization": "Bearer <span class="k">YOUR_KEY</span>"},
-    json={"mediapipe": [[lm.x * w, lm.y * h] for lm in results.pose_landmarks.landmark],
-          "question": "assess the shoulders"},
+    headers={"Authorization": f"Bearer {os.environ['REHABVLM_API_KEY']}"},
+    json={"hand": [[lm.x, lm.y, lm.z] for lm in results.multi_hand_world_landmarks[0].landmark],
+          "question": "which finger is most limited?"},
 )
 print(r.json()["answer"])</code></pre>
     </div>
@@ -95,14 +126,17 @@ print(r.json()["answer"])</code></pre>
   <section class="card small">
     <h2>Reference</h2>
     <h3><code>POST /api/v1/assess</code></h3>
+    <p>Send <b>either</b> a body <b>or</b> a hand.</p>
     <table class="ref">
-      <tr><td><code>joints</code></td><td>Object with 13 named points <code>[x, y]</code> or <code>[x, y, z]</code>: nose, l_/r_shoulder, l_/r_elbow, l_/r_wrist, l_/r_hip, l_/r_knee, l_/r_ankle. "l" = the person's own left.</td></tr>
-      <tr><td><code>mediapipe</code></td><td>Alternative to <code>joints</code>: the 33 MediaPipe Pose landmarks as <code>[x, y]</code>.</td></tr>
-      <tr><td><code>space</code></td><td><code>"image"</code> (default: x right, y down, person facing the camera) or <code>"unity"</code> (avatar root space: Y up, facing +Z).</td></tr>
+      <tr><td><code>joints</code></td><td>Body: object with 13 named points <code>[x, y]</code> or <code>[x, y, z]</code>: nose, l_/r_shoulder, l_/r_elbow, l_/r_wrist, l_/r_hip, l_/r_knee, l_/r_ankle. "l" = the person's own left.</td></tr>
+      <tr><td><code>mediapipe</code></td><td>Body alternative: the 33 MediaPipe Pose landmarks as <code>[x, y]</code>.</td></tr>
+      <tr><td><code>hand</code></td><td>Hand: 21 landmarks <code>[x, y, z]</code> in MediaPipe Hands order (wrist; thumb CMC, MCP, IP, tip; then MCP, PIP, DIP, tip for index, middle, ring, pinky). Any orientation, scale or units.</td></tr>
+      <tr><td><code>handedness</code></td><td>Optional <code>"left"</code> / <code>"right"</code>, echoed back.</td></tr>
+      <tr><td><code>space</code></td><td><code>"image"</code> (default) or <code>"unity"</code> (Unity's left-handed axes; body joints in avatar root space).</td></tr>
       <tr><td><code>question</code></td><td>Free text, matched to the closest task.</td></tr>
-      <tr><td><code>task</code> / <code>tasks</code></td><td>One or more of: describe, shoulders, elbows, hips, symmetry, weaker, exercise.</td></tr>
+      <tr><td><code>task</code> / <code>tasks</code></td><td>Body: describe, shoulders, elbows, hips, symmetry, weaker, exercise.<br>Hand: describe, fist, pinch, limited, spread, exercise.</td></tr>
     </table>
-    <p>Response:</p>
+    <p>Body response:</p>
 <pre><code>{
   "model": "rehabvlm-body-0.1",
   "answer": "The right side shows less range, 105 degrees less shoulder abduction.",
@@ -111,8 +145,18 @@ print(r.json()["answer"])</code></pre>
                   "l_elbow_flex": 3.7, "r_hip_abd": 2.4, "l_hip_abd": 6.6, "trunk_lean": -8.2 },
   "latency_ms": 890
 }</code></pre>
-    <p>Errors come back as <code>{"error": {"code", "message"}}</code> with status 400 (bad input), 401 (bad key) or 429 (rate limited). <code>GET /api/v1/health</code> lists the available tasks.</p>
-    <p class="hint">Current model: full-body, frontal plane (arms, elbows, hips, trunk). A hand and finger model for hand-tracking apps is on the roadmap.</p>
+    <p>Hand response:</p>
+<pre><code>{
+  "model": "rehabvlm-hand-0.1",
+  "answer": "The ring finger has the least flexion, 45 degrees.",
+  "answers": { "limited": "..." },
+  "measurements": { "thumb_flex": 85, "index_flex": 250, "middle_flex": 250, "ring_flex": 45,
+                    "pinky_flex": 250, "spread": null, "pinch_gap": 85 },
+  "handedness": "right",
+  "latency_ms": 640
+}</code></pre>
+    <p>Finger flexion is summed over the finger's joints (MCP + PIP + DIP; thumb MCP + IP), so a full fist is about 250°. <code>pinch_gap</code> is the thumb-to-index distance as a % of hand width. <code>spread</code> is <code>null</code> while the fingers are too curled to measure.</p>
+    <p>Errors come back as <code>{"error": {"code", "message"}}</code> with status 400 (bad input), 401 (bad key) or 429 (rate limited). <code>GET /api/v1/health</code> lists the models and tasks.</p>
     <p class="warn">Research and education use only. Not a medical device.</p>
   </section>
 </main>
@@ -126,19 +170,28 @@ print(r.json()["answer"])</code></pre>
       const j = await r.json();
       if (!r.ok) throw new Error(j.error ? j.error.message : r.status);
       $("key").textContent = j.key;
-      $("keybox").hidden = false;
-      document.querySelectorAll(".k").forEach((e) => { e.textContent = j.key; });
-      $("keymsg").textContent = "Copy it now. It isn't stored anywhere, so we can't show it again. The code samples below now include your key.";
+      $("envline").textContent = "REHABVLM_API_KEY=" + j.key;
+      $("keyout").hidden = false;
+      $("keymsg").textContent = "Copy it now. It isn't stored anywhere, so it can't be shown again.";
     } catch (e) {
       $("keymsg").textContent = "Could not create a key: " + e.message;
     } finally {
       $("getkey").disabled = false;
     }
   };
-  $("copy").onclick = async () => {
-    try { await navigator.clipboard.writeText($("key").textContent); $("copy").textContent = "Copied"; }
-    catch { $("copy").textContent = "Select and copy manually"; }
-  };
+  document.querySelectorAll(".copy").forEach((b) => b.onclick = async () => {
+    const text = $(b.dataset.copy).textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      b.textContent = "Copied";
+    } catch {
+      const range = document.createRange();   // fallback: select it for manual copy
+      range.selectNodeContents($(b.dataset.copy));
+      getSelection().removeAllRanges(); getSelection().addRange(range);
+      b.textContent = "Selected";
+    }
+    setTimeout(() => { b.textContent = "Copy"; }, 1500);
+  });
   document.querySelectorAll(".tabs .chip").forEach((b) => b.onclick = () => {
     document.querySelectorAll(".tabs .chip").forEach((x) => x.classList.toggle("on", x === b));
     document.querySelectorAll(".tab").forEach((t) => { t.hidden = t.id !== "tab-" + b.dataset.tab; });

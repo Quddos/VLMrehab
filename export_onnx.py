@@ -56,9 +56,9 @@ def main():
     img = torch.zeros(1, 3, 96, 96)
     mem = model.encode_image(img)
     ids = torch.tensor([[1, 5, 6, 7]])
-    torch.onnx.export(Enc(model), (img,), f"{args.out}/encoder.onnx", input_names=["image"],
+    torch.onnx.export(Enc(model).eval(), (img,), f"{args.out}/encoder.onnx", input_names=["image"],
                       output_names=["img_tokens"], opset_version=17, dynamo=False)
-    torch.onnx.export(Dec(model), (mem, ids), f"{args.out}/decoder.onnx",
+    torch.onnx.export(Dec(model).eval(), (mem, ids), f"{args.out}/decoder.onnx",
                       input_names=["img_tokens", "ids"], output_names=["logits"],
                       dynamic_axes={"ids": {1: "T"}, "logits": {1: "T"}},
                       opset_version=17, dynamo=False)

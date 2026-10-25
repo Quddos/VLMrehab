@@ -78,13 +78,24 @@ Real photos go through MediaPipe Pose on the device, and the landmarks are drawn
 
 Evaluated on 300 fresh synthetic poses (`python evaluate.py`):
 
-RESULTS_PLACEHOLDER
+| Joint angle read by the VLM | Mean absolute error |
+|---|---|
+| Shoulder abduction (R / L) | 1.8° / 1.7° |
+| Elbow flexion (R / L) | 2.5° / 2.3° |
+| Hip abduction (R / L) | 1.4° / 1.5° |
+| **Overall** | **1.9°** |
+
+For comparison, the first version (plain ViT, no auxiliary loss) scored about 59° on shoulders, which is chance level.
+
+Exact match with the full reference sentence (every angle in the right 5° bin and every grade correct): weaker side 72%, hips 69%, elbows 46%, shoulders 45%, symmetry 44%, exercise suggestion 98%, full posture description 21% (seven numbers must all land in the same 5° bin). Most misses are one bin off.
+
+> These numbers are on synthetic skeletons. Accuracy on real photos also depends on the pose estimator and camera angle.
 
 ## Run it yourself
 
 ```bash
 pip install -r requirements.txt
-python train.py --steps 4000          # ~2 h on a 4-core CPU
+python train.py --steps 4000          # ~2 h on a 4-core CPU (trained weights are included in checkpoints/)
 python evaluate.py --n 300
 python export_onnx.py                 # writes web/model/{encoder,decoder}.onnx + vocab
 cd web && python -m http.server 8000  # open http://localhost:8000

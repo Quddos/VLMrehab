@@ -4,7 +4,7 @@ A **tiny vision-language model (3M parameters)** for motor function and range-of
 
 It runs **fully in the browser** (ONNX Runtime Web + MediaPipe), so a patient's photo never leaves their phone, and the whole thing is hosted for free as a static site.
 
-**Live demo:** _see the repository's website link_
+**Live demo:** https://rehabvlm.vercel.app (works on phones; try an example patient or take a full-body photo)
 
 ```
 photo ──► on-device pose estimation ──► colour-coded skeleton (96×96) ──► RehabVLM ──► "right shoulder abduction 60 degrees, limited ..."

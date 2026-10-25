@@ -219,7 +219,7 @@ async function setMode(m) {
   $("step1").textContent = cfg.title;
   $("instructions").textContent = cfg.instructions;
   $("ask").placeholder = cfg.placeholder;
-  $("mirror").parentElement.hidden = m !== "body";
+  $("mirror").parentElement.style.display = m === "body" ? "" : "none";
   $("seecap").textContent = m === "body" ? "What the VLM sees (96×96)" : "What the VLM sees: front, side and top views";
   $("answer").innerHTML = "";
   $("geom").innerHTML = "";

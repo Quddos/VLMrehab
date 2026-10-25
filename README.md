@@ -138,6 +138,21 @@ For comparison, the first version (plain ViT, no auxiliary loss) scored about 59
 
 Exact match with the full reference sentence (every angle in the right 5° bin and every grade correct): weaker side 72%, hips 69%, elbows 46%, shoulders 45%, symmetry 44%, exercise suggestion 98%, full posture description 21% (seven numbers must all land in the same 5° bin). Most misses are one bin off.
 
+**Hand model** (300 fresh synthetic hands, random orientation, mirroring and tracker noise):
+
+| Finger flexion read by the VLM (summed over the finger's joints) | Mean absolute error |
+|---|---|
+| Thumb / index / middle / ring / pinky | 5.1° / 9.1° / 9.5° / 8.1° / 9.0° |
+| **Overall** (on a 0–270° scale) | **8.2°** |
+
+| Clinical call | Accuracy |
+|---|---|
+| Fist grade (full / partial / slightly flexed / open) | 95.0% |
+| Pinch (achieved / close / not achieved) | 90.5% |
+| Finger spread grade | 96.0% |
+| Exercise advice category | 90.0% |
+| Most limited finger, when it lags >20° behind the next one | 93.2% (72.5% including near-ties) |
+
 > These numbers are on synthetic skeletons. Accuracy on real photos also depends on the pose estimator and camera angle.
 
 ## Run it yourself

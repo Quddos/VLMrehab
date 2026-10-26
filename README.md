@@ -165,7 +165,15 @@ Exact match with the full reference sentence (every angle in the right 5° bin a
 | Exercise advice category | 90.0% |
 | Most limited finger, when it lags >20° behind the next one | 93.2% (72.5% including near-ties) |
 
-WRIST_RESULTS_PLACEHOLDER
+**Wrist model** (300 fresh synthetic wrists, random orientation, left/right hands, tracker noise, and a coarser elbow from body tracking):
+
+| Wrist angle read by the VLM | Mean absolute error |
+|---|---|
+| Flexion / extension | 1.4° |
+| Radial / ulnar deviation | 1.5° |
+| **Overall** | **1.5°** |
+
+Exact-match answers: exercise advice 97.7%, bend grade 83.7%, side-bend grade 79.7%, full description 68.0% (both numbers in the same 5° bin).
 
 > These numbers are on synthetic skeletons. Accuracy on real photos also depends on the pose estimator and camera angle.
 

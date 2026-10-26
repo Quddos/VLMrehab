@@ -4,20 +4,19 @@
     python evaluate.py --ckpt checkpoints/rehabvlm-hand.pt --n 300
 """
 import argparse
-import re
 import numpy as np
 import torch
 
+from rehabvlm.answers import parse_describe
 from rehabvlm.domains import DOMAINS
 from rehabvlm.text import Tokenizer, BOS, SEP, EOS
 from rehabvlm.model import TinyVLM
 
-# (phrase in the 'describe' answer, measurement key) per domain
+# measurement keys scored from the 'describe' answer, per domain
 FIELDS = {
-    "body": [("right shoulder abduction", "r_shoulder_abd"), ("left shoulder abduction", "l_shoulder_abd"),
-             ("right elbow flexion", "r_elbow_flex"), ("left elbow flexion", "l_elbow_flex"),
-             ("right hip abduction", "r_hip_abd"), ("left hip abduction", "l_hip_abd")],
-    "hand": [(f"{f} flexion", f"{f}_flex") for f in ["thumb", "index", "middle", "ring", "pinky"]],
+    "body": ["r_shoulder_abd", "l_shoulder_abd", "r_elbow_flex", "l_elbow_flex", "r_hip_abd", "l_hip_abd"],
+    "hand": [f"{f}_flex" for f in ["thumb", "index", "middle", "ring", "pinky"]],
+    "wrist": ["wrist_flex", "wrist_dev"],
 }
 
 
@@ -39,7 +38,7 @@ def main():
     dom = DOMAINS[domain]
     rng = np.random.default_rng(args.seed)
 
-    errs = {k: [] for _, k in FIELDS[domain]}
+    errs = {k: [] for k in FIELDS[domain]}
     exact = {t: [] for t in dom.questions}
     for i in range(args.n):
         img, m = dom.sample(rng, width=2.2 if domain == "body" else 2.0)
@@ -50,13 +49,13 @@ def main():
             ref = tok.decode(tok.encode(dom.answer(task, m)))
             exact[task].append(out == ref)
             if task == "describe":
-                for phrase, key in FIELDS[domain]:
-                    hit = re.search(phrase + r" (\d+) degrees", out)
-                    errs[key].append(abs(int(hit.group(1)) - m[key]) if hit else 180)
+                said = parse_describe(domain, out)
+                for key in FIELDS[domain]:
+                    errs[key].append(abs(said[key] - m[key]) if key in said else 180)
             if i == 0:
                 print(f"[{task}] {out}")
     print(f"\n[{domain}] mean absolute error vs. true angle (degrees, 'describe' task):")
-    for _, k in FIELDS[domain]:
+    for k in FIELDS[domain]:
         print(f"  {k:16s} {np.mean(errs[k]):5.1f}")
     print(f"  {'overall':16s} {np.mean([e for v in errs.values() for e in v]):5.1f}")
     print("\nexact-match with reference answer (5-degree bins):")

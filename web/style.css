@@ -74,3 +74,4 @@ table.ref td:first-child { white-space: nowrap; }
 .labels { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-bottom: 12px; }
 .tracker { font-size: 0.8rem; color: var(--accent); }
 .views.one { grid-template-columns: 1fr; max-width: 360px; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }

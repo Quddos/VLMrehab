@@ -12,7 +12,7 @@
 <header>
   <p class="nav"><a href="developers.html">API for developers →</a></p>
   <h1>RehabVLM</h1>
-  <p class="sub">Tiny 3M-parameter vision-language models for motor function and range-of-motion assessment of the body and the hand. They run entirely in your browser, so your photo never leaves the device.</p>
+  <p class="sub">Tiny 3M-parameter vision-language models for motor function and range-of-motion assessment of the body, hand and wrist. They run entirely in your browser, so your photo never leaves the device.</p>
 </header>
 
 <main>
@@ -58,7 +58,8 @@
 
   <section class="card small">
     <h2>About</h2>
-    <p>Architecture: CNN-ViT image encoder (with CoordConv) → projector → causal transformer decoder (LLaVA-style prefix-LM), trained from scratch on procedurally generated skeletons. Real photos go through on-device pose estimation (MediaPipe) and are drawn as the same colour-coded skeleton before the VLM reads them. Body skeleton: <b>red</b> = subject's right, <b>green</b> = left, <b>blue</b> = trunk. Hands are put into a standard orientation and drawn from three sides (red = front, green = side, blue = top), so the model can read finger curl in 3D.</p>
+    <p>Architecture: CNN-ViT image encoder (with CoordConv) → projector → causal transformer decoder (LLaVA-style prefix-LM), trained from scratch on procedurally generated skeletons. Real photos go through on-device pose estimation (MediaPipe) and are drawn as the same colour-coded skeleton before the VLM reads them. Body skeleton: <b>red</b> = subject's right, <b>green</b> = left, <b>blue</b> = trunk. Hands are put into a standard orientation and drawn from three sides (red = front, green = side, blue = top), so the model can read finger curl in 3D. Wrists add the forearm (from body tracking) as a reference line.</p>
+    <p>Clinicians and researchers: <a href="collect.html">collect goniometer-labelled data</a> to fine-tune these models on real patients.</p>
     <p class="warn">Research and education demo, not a medical device. Do not use it for diagnosis or treatment decisions.</p>
   </section>
 </main>

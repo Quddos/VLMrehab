@@ -15,9 +15,13 @@ from rehabvlm.model import TinyVLM
 
 
 def make_batch(rng, tok, n, dom, max_len=64):
+    return collate(rng, tok, dom, [dom.sample(rng) for _ in range(n)], max_len)
+
+
+def collate(rng, tok, dom, items, max_len=64):
+    """items: [(image, measurements)] -> tensors; each item gets a random question."""
     imgs, ids, tgt, ang = [], [], [], []
-    for _ in range(n):
-        img, m = dom.sample(rng)
+    for img, m in items:
         tasks = list(dom.questions)
         task = tasks[rng.integers(len(tasks))]
         q = tok.encode(dom.questions[task])

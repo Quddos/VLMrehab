@@ -20,6 +20,7 @@
     <div class="mode" role="tablist">
       <button id="mode-body" class="on">Body</button>
       <button id="mode-hand">Hand</button>
+      <button id="mode-wrist">Wrist</button>
     </div>
     <h2 id="step1">1 · Pose</h2>
     <p id="instructions" class="hint"></p>
@@ -28,6 +29,8 @@
         <input id="file" type="file" accept="image/*" capture="environment" hidden>
       </label>
       <label class="check"><input id="mirror" type="checkbox"> Mirrored selfie</label>
+      <label class="check" id="handed-row">Hand
+        <select id="handedness"><option value="right">Right</option><option value="left">Left</option></select></label>
     </div>
     <p class="hint">Or try an example:</p>
     <div id="demos" class="chips"></div>

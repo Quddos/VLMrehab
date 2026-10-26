@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RehabVLM Data Collection</title>
+  <meta name="description" content="Clinician tool to record tracker landmarks with goniometer measurements for fine-tuning RehabVLM. Stores no photos.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <p class="nav"><a href="./">← Demo</a> · <a href="developers.html">API</a></p>
+  <h1>Collect fine-tuning data</h1>
+  <p class="sub">For clinicians and researchers. Photograph a movement, measure the same joint with a goniometer, and save both. Fine-tuning on these records teaches RehabVLM to read real trackers the way you measure.</p>
+</header>
+
+<main>
+  <section class="card">
+    <div class="mode" role="tablist">
+      <button data-mode="body" class="on">Body</button>
+      <button data-mode="hand">Hand</button>
+      <button data-mode="wrist">Wrist</button>
+    </div>
+    <div class="form">
+      <label>Pseudonymous subject ID
+        <input id="subject" type="text" placeholder="e.g. site1-017 (no names)" autocomplete="off">
+      </label>
+      <label id="handed-row" hidden>Hand
+        <select id="handedness"><option value="right">Right</option><option value="left">Left</option></select>
+      </label>
+      <label class="check consent"><input id="consent" type="checkbox">
+        Informed consent for this recording is documented under your local ethics / data protection rules.</label>
+    </div>
+    <p id="instructions" class="hint"></p>
+    <div class="row">
+      <label class="btn primary">Take / upload photo
+        <input id="file" type="file" accept="image/*" capture="environment" hidden>
+      </label>
+    </div>
+    <div class="views one">
+      <figure><canvas id="photo" width="320" height="320"></canvas><figcaption>Landmarks (the photo itself is never saved)</figcaption></figure>
+    </div>
+    <p id="status" class="status">Choose a mode and add a photo.</p>
+  </section>
+
+  <section class="card">
+    <h2>Goniometer measurements</h2>
+    <p class="hint">Enter what you measured, in degrees. Leave blank anything you didn't measure. Each field shows what the tracker read, for reference.</p>
+    <div id="labels" class="labels"></div>
+    <div class="row">
+      <button id="add" class="btn primary" disabled>Save record</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Records</h2>
+    <p id="count" class="status">0 records</p>
+    <div class="row">
+      <button id="download" class="btn" disabled>Download JSONL</button>
+      <button id="clear" class="btn">Clear</button>
+    </div>
+    <p class="hint">Records stay in this browser until you download or clear them. Train with:<br>
+      <code>python finetune.py --base checkpoints/rehabvlm-hand.pt --data records.jsonl --out checkpoints/rehabvlm-hand-ft.pt</code></p>
+    <p class="warn">Handle exported files as health data: store them securely and share only under your data-use agreement.</p>
+  </section>
+</main>
+<script type="module" src="collect.js"></script>
+</body>
+</html>

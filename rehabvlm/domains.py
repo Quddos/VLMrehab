@@ -1,7 +1,7 @@
 """Registry of assessment domains: data generator, measurements, Q&A templates, vocab."""
 from types import SimpleNamespace
 
-from rehabvlm import hand, hand_text, pose, text
+from rehabvlm import hand, hand_text, pose, text, wrist, wrist_text
 
 
 def _body_targets(m):
@@ -15,9 +15,15 @@ def _hand_targets(m):
     return t
 
 
+def _wrist_targets(m):
+    return [m["wrist_flex"] / 60, m["wrist_dev"] / 20]
+
+
 DOMAINS = {
     "body": SimpleNamespace(sample=pose.sample, questions=text.QUESTIONS, answer=text.answer,
                             build_vocab=text.build_vocab, targets=_body_targets, n_targets=7),
     "hand": SimpleNamespace(sample=hand.sample, questions=hand_text.QUESTIONS, answer=hand_text.answer,
                             build_vocab=hand_text.build_vocab, targets=_hand_targets, n_targets=7),
+    "wrist": SimpleNamespace(sample=wrist.sample, questions=wrist_text.QUESTIONS, answer=wrist_text.answer,
+                             build_vocab=wrist_text.build_vocab, targets=_wrist_targets, n_targets=2),
 }

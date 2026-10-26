@@ -9,7 +9,7 @@
 </head>
 <body>
 <header>
-  <p class="nav"><a href="./">← Demo</a></p>
+  <p class="nav"><a href="./">← Demo</a> · <a href="collect.html">Collect fine-tuning data</a></p>
   <h1>RehabVLM API</h1>
   <p class="sub">Send body joints or hand landmarks from any camera or tracker (Unity / VR body and hand tracking, MediaPipe, Kinect, mocap) and get a range-of-motion assessment back, in plain language and in degrees.</p>
 </header>
@@ -63,6 +63,12 @@
 <pre><code>handClient.Assess("make a fist", r =&gt; {
     label.text = r.answer;   // "Average finger flexion 160 degrees, partial fist. Least flexed is the ring finger ..."
     if (r.measurements.pinch_gap &lt; 25) OnPinchSuccess();
+});
+
+// Wrist: assign Elbow (or a body-tracked Humanoid Animator) and Tracking Space (XR Origin)
+handClient.AssessWrist("how far can I bend my wrist back?", r =&gt; {
+    label.text = r.answer;   // "Wrist extension 35 degrees, partial range. Typical extension is 55 to 70 degrees."
+    progressBar.value = -r.measurements.wrist_flex / 70f;
 });
 
 // Webcam hand tracker instead of XR? Send its 21 landmarks (MediaPipe order):
@@ -126,15 +132,17 @@ print(r.json()["answer"])</code></pre>
   <section class="card small">
     <h2>Reference</h2>
     <h3><code>POST /api/v1/assess</code></h3>
-    <p>Send <b>either</b> a body <b>or</b> a hand.</p>
+    <p>Send <b>either</b> a body <b>or</b> a hand. Add an elbow to a hand to get wrist angles too.</p>
     <table class="ref">
       <tr><td><code>joints</code></td><td>Body: object with 13 named points <code>[x, y]</code> or <code>[x, y, z]</code>: nose, l_/r_shoulder, l_/r_elbow, l_/r_wrist, l_/r_hip, l_/r_knee, l_/r_ankle. "l" = the person's own left.</td></tr>
       <tr><td><code>mediapipe</code></td><td>Body alternative: the 33 MediaPipe Pose landmarks as <code>[x, y]</code>.</td></tr>
       <tr><td><code>hand</code></td><td>Hand: 21 landmarks <code>[x, y, z]</code> in MediaPipe Hands order (wrist; thumb CMC, MCP, IP, tip; then MCP, PIP, DIP, tip for index, middle, ring, pinky). Any orientation, scale or units.</td></tr>
-      <tr><td><code>handedness</code></td><td>Optional <code>"left"</code> / <code>"right"</code>, echoed back.</td></tr>
+      <tr><td><code>elbow</code></td><td>Wrist: <code>[x, y, z]</code> of the same arm's elbow, in the same axes as <code>hand</code> (it may come from a body tracker; only the forearm direction is used).</td></tr>
+      <tr><td><code>handedness</code></td><td><code>"left"</code> / <code>"right"</code>. Required for the wrist, because it decides which side is the palm (flexion vs extension).</td></tr>
+      <tr><td><code>model</code></td><td><code>"wrist"</code> selects the wrist model. Any question mentioning the wrist does the same.</td></tr>
       <tr><td><code>space</code></td><td><code>"image"</code> (default) or <code>"unity"</code> (Unity's left-handed axes; body joints in avatar root space).</td></tr>
       <tr><td><code>question</code></td><td>Free text, matched to the closest task.</td></tr>
-      <tr><td><code>task</code> / <code>tasks</code></td><td>Body: describe, shoulders, elbows, hips, symmetry, weaker, exercise.<br>Hand: describe, fist, pinch, limited, spread, exercise.</td></tr>
+      <tr><td><code>task</code> / <code>tasks</code></td><td>Body: describe, shoulders, elbows, hips, symmetry, weaker, exercise.<br>Hand: describe, fist, pinch, limited, spread, exercise.<br>Wrist: describe, bend, side, exercise.</td></tr>
     </table>
     <p>Body response:</p>
 <pre><code>{
@@ -155,6 +163,14 @@ print(r.json()["answer"])</code></pre>
   "handedness": "right",
   "latency_ms": 640
 }</code></pre>
+    <p>Wrist response (<code>model: "wrist"</code>, with <code>elbow</code>):</p>
+<pre><code>{
+  "model": "rehabvlm-wrist-0.1",
+  "answer": "Wrist flexion 60 degrees, full range. Typical flexion is 60 to 80 degrees.",
+  "measurements": { ..., "wrist_flex": 60.2, "wrist_dev": -19.8 },
+  "handedness": "right"
+}</code></pre>
+    <p><code>wrist_flex</code>: + flexion (towards the palm), − extension. <code>wrist_dev</code>: + radial (thumb side), − ulnar. Hand requests that include an elbow also get these two values.</p>
     <p>Finger flexion is summed over the finger's joints (MCP + PIP + DIP; thumb MCP + IP), so a full fist is about 250°. <code>pinch_gap</code> is the thumb-to-index distance as a % of hand width. <code>spread</code> is <code>null</code> while the fingers are too curled to measure.</p>
     <p>Errors come back as <code>{"error": {"code", "message"}}</code> with status 400 (bad input), 401 (bad key) or 429 (rate limited). <code>GET /api/v1/health</code> lists the models and tasks.</p>
     <p class="warn">Research and education use only. Not a medical device.</p>

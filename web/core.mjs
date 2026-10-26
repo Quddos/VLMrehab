@@ -4,6 +4,7 @@
 export const IMG = 96;
 export const MODEL_VERSION = "rehabvlm-body-0.1";
 export const HAND_MODEL_VERSION = "rehabvlm-hand-0.1";
+export const WRIST_MODEL_VERSION = "rehabvlm-wrist-0.1";
 
 export const QUESTIONS = {
   describe: ["Describe posture", "describe the posture ."],
@@ -39,9 +40,27 @@ const HAND_ROUTES = [
   [/fist|grip|close|squeeze|curl|grab/, "fist"],
 ];
 
+export const WRIST_QUESTIONS = {
+  describe: ["Describe wrist", "describe the wrist ."],
+  bend: ["Bend up / down", "assess wrist bending ."],
+  side: ["Side bend", "assess wrist side bending ."],
+  exercise: ["Suggest exercises", "suggest wrist exercises ."],
+};
+const WRIST_ROUTES = [
+  [/exercis|rehab|therap|improve|help|train|workout|stretch/, "exercise"],
+  [/side|radial|ulnar|deviat|thumb side|pinky side/, "side"],
+  [/bend|flex|extend|extension|up|down|cock/, "bend"],
+];
+const DOMAIN_Q = {
+  body: [QUESTIONS, ROUTES], hand: [HAND_QUESTIONS, HAND_ROUTES], wrist: [WRIST_QUESTIONS, WRIST_ROUTES],
+};
+
+/** True when a free-text question is about the wrist rather than the fingers. */
+export const isWristQuestion = (q) => /wrist|radial|ulnar|deviat/.test(String(q || "").toLowerCase());
+
 /** Map a free-text question (or a task name) to one of the supported tasks. */
 export function routeQuestion(q, domain = "body") {
-  const [questions, routes] = domain === "hand" ? [HAND_QUESTIONS, HAND_ROUTES] : [QUESTIONS, ROUTES];
+  const [questions, routes] = DOMAIN_Q[domain];
   q = String(q || "").toLowerCase().trim();
   if (q in questions) return q;
   return (routes.find(([re]) => re.test(q)) || [null, "describe"])[1];
@@ -143,6 +162,10 @@ export async function encodeHand(model, landmarks) {
   return encodePixels(model, rasteriseHand(canonicaliseHand(landmarks)));
 }
 
+export async function encodeWrist(model, landmarks, elbow, handedness) {
+  return encodePixels(model, rasteriseWrist(canonicaliseWrist(landmarks, elbow, handedness)));
+}
+
 async function encodePixels(model, pixels) {
   const { img_tokens } = await model.encoder.run({
     image: new model.ort.Tensor("float32", pixels, [1, 3, IMG, IMG]),
@@ -239,6 +262,47 @@ export function measureHand(k) {
   return out;
 }
 
+// ---------- wrists (mirrors rehabvlm/wrist.py) ----------
+// 21 hand landmarks + elbow. Flexion > 0 towards the palm, radial deviation > 0 towards the thumb.
+const WRIST_VIEWS = [[0, 1, 0.0, 0.3], [2, 1, 0.0, 0.3], [0, 2, 0.0, 0.0]];
+const WRIST_PX = 28, WRIST_STUB = 1.2;
+
+function wristFrame(k, elbow, handedness) {
+  const f = unit(v3.sub(k[0], elbow));
+  const s = String(handedness).toLowerCase() === "left" ? -1 : 1;
+  let n = v3.scale(v3.cross(v3.sub(k[5], k[0]), v3.sub(k[17], k[0])), s);
+  n = unit(v3.sub(n, v3.scale(f, v3.dot(n, f))));
+  const r = v3.scale(v3.cross(f, n), s);
+  return { f, n, r };
+}
+
+export function measureWrist(k, elbow, handedness = "right") {
+  const { f, n, r } = wristFrame(k, elbow, handedness);
+  const h = unit(v3.sub(k[9], k[0]));
+  return {
+    wrist_flex: Math.atan2(v3.dot(h, n), v3.dot(h, f)) * 180 / Math.PI,
+    wrist_dev: Math.asin(Math.max(-1, Math.min(1, v3.dot(h, r)))) * 180 / Math.PI,
+  };
+}
+
+export function canonicaliseWrist(k, elbow, handedness = "right") {
+  const { f, n, r } = wristFrame(k, elbow, handedness);
+  const rel = k.map((p) => v3.sub(p, k[0]));
+  const s = 1 / (v3.norm(rel[9]) + 1e-9);
+  return [...rel.map((p) => [v3.dot(p, r) * s, v3.dot(p, f) * s, v3.dot(p, n) * s]), [0, -WRIST_STUB, 0]];
+}
+
+export function rasteriseWrist(c, width = 2.0, size = IMG) {
+  const img = new Float32Array(3 * size * size);
+  WRIST_VIEWS.forEach(([u, v, cu, cv], ch) => {
+    const pts = c.map((p) => [(p[u] - cu) * WRIST_PX + size / 2, size / 2 - (p[v] - cv) * WRIST_PX]);
+    for (const [a, b] of HAND_SEGMENTS) inkSegment(img, ch, pts[a], pts[b], width, size);
+    inkSegment(img, ch, pts[0], pts[21], 2 * width, size);
+    for (const tip of [4, 8, 12, 16, 20]) inkSegment(img, ch, pts[tip], pts[tip], 2 * width, size);
+  });
+  return img;
+}
+
 // ---------- input adapters (used by the API) ----------
 /**
  * Convert API input into 13 image-space keypoints [[x, y], ...] (x right, y down,
@@ -283,4 +347,13 @@ export function handFromInput(body) {
     }
     return body.space === "unity" ? [p[0], p[1], -p[2]] : [p[0], p[1], p[2]];
   });
+}
+
+/** Elbow for wrist assessment: { elbow: [x, y, z] } in the same axes as `hand`. */
+export function elbowFromInput(body) {
+  const e = body.elbow;
+  if (!Array.isArray(e) || e.length < 3 || !e.slice(0, 3).every(Number.isFinite)) {
+    throw new Error("wrist assessment needs `elbow`: [x, y, z] in the same axes as `hand`");
+  }
+  return body.space === "unity" ? [e[0], e[1], -e[2]] : [e[0], e[1], e[2]];
 }

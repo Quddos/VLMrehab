@@ -5,6 +5,11 @@
 // or a git-ignored Assets/Resources/rehabvlm_env.txt containing REHABVLM_API_KEY=rvlm_...
 //
 //   handClient.Assess("make a fist", r => label.text = r.answer);
+//   handClient.AssessWrist("bend your wrist up", r => label.text = r.answer);   // needs an elbow
+//
+// Wrist angles need the forearm direction, so give the client an elbow: assign Elbow (any
+// Transform at the elbow) or a Humanoid Animator driven by body tracking (Meta Movement SDK,
+// VRIK, ...), which supplies the LowerArm bone. Hand tracking alone has no elbow.
 //
 // Not using XR Hands? Call AssessLandmarks() with 21 points in MediaPipe Hands order instead
 // (e.g. from a webcam hand tracker).
@@ -23,6 +28,8 @@ namespace RehabVLM
         public float thumb_flex, index_flex, middle_flex, ring_flex, pinky_flex; // degrees, summed over finger joints
         public float spread;     // degrees between index and pinky; 0 when fingers are too curled to measure
         public float pinch_gap;  // thumb tip to index tip, % of hand width
+        public float wrist_flex; // degrees, + towards the palm, - extension (only when an elbow is sent)
+        public float wrist_dev;  // degrees, + radial (thumb side), - ulnar
     }
 
     [Serializable]
@@ -43,6 +50,15 @@ namespace RehabVLM
         public string apiKey = "";
         public string endpoint = RehabVLMConfig.DefaultBaseUrl + "/api/v1/assess";
         public Handedness hand = Handedness.Right;
+
+        [Header("Elbow (needed for wrist assessment)")]
+        [Tooltip("Any Transform placed at the elbow of the tracked arm.")]
+        public Transform elbow;
+        [Tooltip("Or a Humanoid Animator driven by body tracking; its LowerArm bone is used.")]
+        public Animator humanoid;
+        [Tooltip("XR Origin (tracking space). XR Hands joints are relative to it; set this so they line up "
+                 + "with a world-space elbow. Leave empty if the origin never moves.")]
+        public Transform trackingSpace;
 
         [Header("Optional automatic polling")]
         public bool autoAssess = false;
@@ -72,8 +88,14 @@ namespace RehabVLM
             Assess(autoQuestion, r => OnResult?.Invoke(r));
         }
 
-        /// <summary>Read the tracked hand from XR Hands and ask a question about it.</summary>
-        public void Assess(string question, Action<HandAssessResult> onDone)
+        /// <summary>Read the tracked hand from XR Hands and ask a question about the fingers.
+        /// If an elbow is available, wrist angles are included in the measurements too.</summary>
+        public void Assess(string question, Action<HandAssessResult> onDone) => AssessTracked(question, false, onDone);
+
+        /// <summary>Ask about the wrist (flexion/extension, radial/ulnar deviation). Needs an elbow.</summary>
+        public void AssessWrist(string question, Action<HandAssessResult> onDone) => AssessTracked(question, true, onDone);
+
+        void AssessTracked(string question, bool wrist, Action<HandAssessResult> onDone)
         {
             var points = ReadTrackedHand();
             if (points == null)
@@ -81,16 +103,42 @@ namespace RehabVLM
                 onDone?.Invoke(new HandAssessResult { error = $"{hand} hand is not tracked" });
                 return;
             }
-            AssessLandmarks(points, question, onDone, hand == Handedness.Left ? "left" : "right");
+            var e = ElbowPosition();
+            if (wrist && e == null)
+            {
+                onDone?.Invoke(new HandAssessResult { error = "Wrist assessment needs Elbow or a Humanoid Animator" });
+                return;
+            }
+            AssessLandmarks(points, question, onDone, hand == Handedness.Left ? "left" : "right", e, wrist);
         }
 
-        /// <summary>Ask about any 21 hand landmarks in MediaPipe Hands order (Unity world or local space).</summary>
+        Vector3? ElbowPosition()
+        {
+            if (elbow != null) return elbow.position;
+            if (humanoid != null)
+            {
+                var bone = humanoid.GetBoneTransform(hand == Handedness.Left
+                    ? HumanBodyBones.LeftLowerArm : HumanBodyBones.RightLowerArm);
+                if (bone != null) return bone.position;
+            }
+            return null;
+        }
+
+        /// <summary>Ask about any 21 hand landmarks in MediaPipe Hands order (Unity world space),
+        /// optionally with an elbow in the same space for wrist angles.</summary>
         public void AssessLandmarks(IList<Vector3> points, string question, Action<HandAssessResult> onDone,
-                                    string handedness = "right")
+                                    string handedness = "right", Vector3? elbowPosition = null, bool wrist = false)
         {
             if (points == null || points.Count != 21) throw new ArgumentException("Need exactly 21 hand landmarks");
             var sb = new StringBuilder("{\"space\":\"unity\",\"handedness\":\"").Append(handedness)
-                .Append("\",\"question\":\"").Append(RehabVLMConfig.Escape(question)).Append("\",\"hand\":[");
+                .Append("\",\"question\":\"").Append(RehabVLMConfig.Escape(question)).Append('"');
+            if (wrist) sb.Append(",\"model\":\"wrist\"");
+            if (elbowPosition is Vector3 ep)
+            {
+                sb.Append(",\"elbow\":[").Append(RehabVLMConfig.Num(ep.x)).Append(',')
+                  .Append(RehabVLMConfig.Num(ep.y)).Append(',').Append(RehabVLMConfig.Num(ep.z)).Append(']');
+            }
+            sb.Append(",\"hand\":[");
             for (int i = 0; i < 21; i++)
             {
                 var p = points[i];
@@ -116,7 +164,7 @@ namespace RehabVLM
             for (int i = 0; i < Order.Length; i++)
             {
                 if (!xrHand.GetJoint(Order[i]).TryGetPose(out var pose)) return null;
-                points[i] = pose.position;
+                points[i] = trackingSpace != null ? trackingSpace.TransformPoint(pose.position) : pose.position;
             }
             return points;
         }

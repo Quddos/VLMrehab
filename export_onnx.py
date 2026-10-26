@@ -74,13 +74,41 @@ def demo_hands():
     return out
 
 
+WRIST_DEMOS = {   # (flexion, deviation) degrees; hand posture
+    "Neutral": ((0, 0), "open"),
+    "Flexed 70°": ((70, -5), "open"),
+    "Extended 50°": ((-50, 0), "open"),
+    "Stroke: flexed + ulnar": ((60, -20), "fist"),
+    "Stiff after fracture": ((15, 3), "open"),
+    "Radial deviation": ((0, 18), "open"),
+}
+
+
+def demo_wrists():
+    from rehabvlm import wrist
+    rng = np.random.default_rng(5)
+    tilt = np.array([[1, 0, 0], [0, np.cos(0.3), -np.sin(0.3)], [0, np.sin(0.3), np.cos(0.3)]])
+    fingers = {"open": ({f: np.array([5., 5., 3.]) for f in ("index", "middle", "ring", "pinky")},
+                        dict(opp=0.1, mcp=5, ip=5), 10.0),
+               "fist": ({f: np.array([80., 95., 65.]) for f in ("index", "middle", "ring", "pinky")},
+                        dict(opp=0.8, mcp=40, ip=45), 0.0)}
+    out = {}
+    for name, (fd, posture) in WRIST_DEMOS.items():
+        k, elbow = wrist.synth_canonical(rng, fd, fingers[posture])
+        # metres, y down: a 180-degree turn about x (a rotation, so a right hand stays a right hand)
+        pts = (np.vstack([k, elbow]) @ tilt.T) * np.array([1, -1, -1]) * 0.09
+        out[name] = {"hand": np.round(pts[:21], 5).tolist(), "elbow": np.round(pts[21], 5).tolist(),
+                     "handedness": "right"}
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ckpt", default="checkpoints/rehabvlm.pt")
     ap.add_argument("--out", default=None, help="default: web/model (body) or web/model/hand")
     args = ap.parse_args()
     model, tok, domain = load(args.ckpt)
-    args.out = args.out or ("web/model" if domain == "body" else "web/model/hand")
+    args.out = args.out or ("web/model" if domain == "body" else f"web/model/{domain}")
     os.makedirs(args.out, exist_ok=True)
     dom = DOMAINS[domain]
 
@@ -98,8 +126,10 @@ def main():
             json.dump({"vocab": tok.itos, "keypoints": KP, "mediapipe_index": MP_INDEX}, f)
         else:
             json.dump({"vocab": tok.itos, "landmarks": 21}, f)
-    with open(f"{args.out}/{'demo_poses' if domain == 'body' else 'demo_hands'}.json", "w") as f:
-        json.dump(demo_poses() if domain == "body" else demo_hands(), f)
+    demos = {"body": ("demo_poses", demo_poses), "hand": ("demo_hands", demo_hands),
+             "wrist": ("demo_wrists", demo_wrists)}[domain]
+    with open(f"{args.out}/{demos[0]}.json", "w") as f:
+        json.dump(demos[1](), f)
 
     # parity check against PyTorch on a random sample
     x = torch.from_numpy(dom.sample(np.random.default_rng(0))[0])[None]

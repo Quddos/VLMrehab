@@ -1,7 +1,7 @@
 // RehabVLM browser app: photo -> MediaPipe (pose or hand) -> skeleton raster -> tiny VLM (onnxruntime-web).
 import {
-  IMG, QUESTIONS, HAND_QUESTIONS, KP, MP_INDEX, SEGMENTS, SEGMENT_INDEX, HAND_SEGMENTS, mid, measure,
-  measureHand, routeQuestion, loadModel, encodePose, encodeHand, generate,
+  IMG, QUESTIONS, HAND_QUESTIONS, WRIST_QUESTIONS, KP, MP_INDEX, SEGMENTS, SEGMENT_INDEX, HAND_SEGMENTS, mid,
+  measure, measureHand, measureWrist, routeQuestion, loadModel, encodePose, encodeHand, encodeWrist, generate,
 } from "./core.mjs";
 
 const MP_VERSION = "0.10.14";
@@ -34,6 +34,13 @@ const MODES = {
       ring_flex: "Ring flexion", pinky_flex: "Pinky flexion", spread: "Index–pinky spread",
       pinch_gap: "Thumb–index gap (% hand width)",
     },
+  },
+  wrist: {
+    title: "1 · Wrist",
+    instructions: "Show your hand and forearm up to the elbow, then bend the wrist up, down or sideways as far as you can. Pick which hand it is.",
+    placeholder: "e.g. how far can I bend my wrist back?",
+    questions: WRIST_QUESTIONS, dir: "model/wrist", demos: "demo_wrists.json", firstDemo: 3,
+    labels: { wrist_flex: "Wrist flexion (+) / extension (−)", wrist_dev: "Radial (+) / ulnar (−) deviation" },
   },
 };
 
@@ -160,6 +167,18 @@ async function useHand(landmarks3d, source, image2d, w, h) {
   ask("describe");
 }
 
+async function useWrist(rec, source, image2d, w, h) {
+  const model = await getModel("wrist");
+  const { pixels, mem } = await encodeWrist(model, rec.hand, rec.elbow, rec.handedness);
+  drawPhoto(source, image2d || fitUnit([...rec.hand, rec.elbow]), [...handLines(), [0, 21, "#38bdf8"]],
+    image2d ? w : 1, image2d ? h : 1);
+  drawSkeleton(pixels);
+  showGeometry(measureWrist(rec.hand, rec.elbow, rec.handedness));
+  current = { mode: "wrist", mem };
+  status("Wrist ready. Ask a question.");
+  ask("describe");
+}
+
 async function ask(task) {
   if (!current) { status("Add a photo or pick an example first."); return; }
   const id = ++runId;
@@ -189,7 +208,7 @@ async function onPhoto(file) {
   const bmp = await createImageBitmap(file);
   drawPhoto(bmp, [], [], bmp.width, bmp.height);
   try {
-    const detector = await getDetector(mode);
+    const detector = await getDetector(mode === "wrist" ? "hand" : mode);
     status(mode === "body" ? "Finding body landmarks…" : "Finding hand landmarks…");
     const res = detector.detect(bmp);
     if (mode === "body") {
@@ -202,7 +221,17 @@ async function onPhoto(file) {
       if (!res.landmarks.length) { status("No hand found. Hold one hand up, fingers visible, in good light."); return; }
       const world = res.worldLandmarks[0].map((p) => [p.x, p.y, p.z]);
       const image = res.landmarks[0].map((p) => [p.x * bmp.width, p.y * bmp.height]);
-      await useHand(world, bmp, image, bmp.width, bmp.height);
+      if (mode === "hand") return await useHand(world, bmp, image, bmp.width, bmp.height);
+      // wrist: forearm direction from the body tracker (camera-aligned axes, like the hand's world landmarks)
+      const handedness = $("handedness").value;
+      const pose = (await getDetector("body")).detect(bmp);
+      if (!pose.worldLandmarks.length) { status("No forearm found. Keep the elbow in the photo."); return; }
+      const W = pose.worldLandmarks[0], [wi, ei] = handedness === "left" ? [15, 13] : [16, 14];
+      const d = [W[wi].x - W[ei].x, W[wi].y - W[ei].y, W[wi].z - W[ei].z], n = Math.hypot(...d) || 1;
+      const elbow = world[0].map((x, i) => x - (d[i] / n) * 0.25);
+      const L = pose.landmarks[0][ei];
+      await useWrist({ hand: world, elbow, handedness }, bmp, [...image, [L.x * bmp.width, L.y * bmp.height]],
+        bmp.width, bmp.height);
     }
   } catch (e) {
     status("Could not run the tracker: " + e.message);
@@ -214,13 +243,14 @@ async function setMode(m) {
   current = null;
   runId++;
   const cfg = MODES[m];
-  $("mode-body").classList.toggle("on", m === "body");
-  $("mode-hand").classList.toggle("on", m === "hand");
+  for (const k of Object.keys(MODES)) $(`mode-${k}`).classList.toggle("on", m === k);
   $("step1").textContent = cfg.title;
   $("instructions").textContent = cfg.instructions;
   $("ask").placeholder = cfg.placeholder;
   $("mirror").parentElement.style.display = m === "body" ? "" : "none";
+  $("handed-row").style.display = m === "wrist" ? "" : "none";
   $("seecap").textContent = m === "body" ? "What the VLM sees (96×96)" : "What the VLM sees: front, side and top views";
+  $("photo").nextElementSibling.textContent = m === "wrist" ? "Input + landmarks (blue = forearm)" : "Input + landmarks";
   $("answer").innerHTML = "";
   $("geom").innerHTML = "";
 
@@ -242,7 +272,8 @@ async function setMode(m) {
   }
   if (mode !== m) return;   // switched again while loading
   $("demos").innerHTML = "";
-  const use = (pts) => (m === "body" ? useBody(pts, null, 1, 1) : useHand(pts, null, null));
+  const use = (pts) => (m === "body" ? useBody(pts, null, 1, 1)
+    : m === "hand" ? useHand(pts, null, null) : useWrist(pts, null, null));
   for (const [name, pts] of Object.entries(demoSets[m])) {
     const b = Object.assign(document.createElement("button"), { className: "chip", textContent: name });
     b.onclick = () => { $("mirror").checked = false; use(pts); };
@@ -258,9 +289,9 @@ function main() {
     if (current) ask(routeQuestion($("ask").value, current.mode));
   };
   $("file").onchange = (e) => { if (e.target.files[0]) onPhoto(e.target.files[0]); e.target.value = ""; };
-  $("mode-body").onclick = () => mode !== "body" && setMode("body");
-  $("mode-hand").onclick = () => mode !== "hand" && setMode("hand");
-  setMode(new URLSearchParams(location.search).get("mode") === "hand" ? "hand" : "body");
+  for (const k of Object.keys(MODES)) $(`mode-${k}`).onclick = () => mode !== k && setMode(k);
+  const requested = new URLSearchParams(location.search).get("mode");
+  setMode(requested in MODES ? requested : "body");
 }
 
 main();

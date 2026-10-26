@@ -4,12 +4,13 @@
 
 * **Body model:** shoulders, elbows, hips, trunk lean, left/right asymmetry.
 * **Hand model:** finger flexion (fist), pinch, finger spread, the most limited finger.
+* **Wrist model:** flexion/extension and radial/ulnar deviation (hand landmarks + elbow).
 
 You show it a body pose or a hand, ask a question in plain language, and it answers with angles, grades and simple exercise suggestions.
 
 It runs **fully in the browser** (ONNX Runtime Web + MediaPipe), so a patient's photo never leaves their phone, and the whole thing is hosted for free as a static site.
 
-**Live demo:** https://rehabvlm.vercel.app (works on phones; switch between **Body** and **Hand**, try an example or take a photo)
+**Live demo:** https://rehabvlm.vercel.app (works on phones; switch between **Body**, **Hand** and **Wrist**, try an example or take a photo)
 
 ```
 photo ──► on-device pose estimation ──► colour-coded skeleton (96×96) ──► RehabVLM ──► "right shoulder abduction 60 degrees, limited ..."
@@ -89,6 +90,17 @@ Finger flexion is summed over a finger's joints (MCP + PIP + DIP; thumb MCP + IP
 
 Free-text questions in the demo are routed to the closest supported question.
 
+**Wrist model** (needs the hand landmarks plus the elbow, and which hand it is):
+
+| Question | Example answer |
+|---|---|
+| describe the wrist | wrist flexion 60 degrees. ulnar deviation 20 degrees. |
+| assess wrist bending | wrist extension 35 degrees, partial range. typical extension is 55 to 70 degrees. |
+| assess wrist side bending | radial deviation 5 degrees, limited. typical radial deviation is 15 to 20 degrees. |
+| suggest wrist exercises | wrist extension is reduced. try reverse wrist curls, prayer stretches and tabletop extension stretches. |
+
+Clinical convention: the hand axis is the 3rd metacarpal (wrist → middle knuckle) and the forearm runs elbow → wrist. Flexion (+) bends towards the palm, extension (−) away from it; radial deviation (+) bends towards the thumb, ulnar (−) towards the little finger. Grades assume a maximal active movement: flexion full ≥60°, extension ≥55°, radial ≥15°, ulnar ≥25°.
+
 Grading thresholds (shoulder abduction during a maximal arm raise): ≥150° full range, 90–150° partial, <90° limited. Asymmetry: <15° minimal, 15–40° moderate, >40° significant.
 
 ## Architecture
@@ -153,7 +165,33 @@ Exact match with the full reference sentence (every angle in the right 5° bin a
 | Exercise advice category | 90.0% |
 | Most limited finger, when it lags >20° behind the next one | 93.2% (72.5% including near-ties) |
 
+WRIST_RESULTS_PLACEHOLDER
+
 > These numbers are on synthetic skeletons. Accuracy on real photos also depends on the pose estimator and camera angle.
+
+## Fine-tuning on real patient data
+
+The models above are trained only on synthetic data. Real trackers make systematic errors; hand trackers, for example, under-read how far fingers curl. A clinician's goniometer is the reference. This repo includes everything needed to adapt the models to real recordings. **It ships with no patient data**: collecting it needs informed consent and ethics/data-protection approval, which only you (or a clinical partner) can arrange.
+
+1. **Collect.** Open [`/collect.html`](https://rehabvlm.vercel.app/collect.html) on a phone or tablet. Pick Body, Hand or Wrist, enter a pseudonymous subject ID, confirm consent, take a photo, measure the same joint with a goniometer and save. Only landmarks and numbers are kept, never the photo. Download the records as JSONL. Unity / VR apps can log the same records: the format is an API request body plus `subject`, `consent` and `labels` (see [`rehabvlm/realdata.py`](rehabvlm/realdata.py)).
+2. **Fine-tune.**
+   ```bash
+   python finetune.py --base checkpoints/rehabvlm-hand.pt --data records.jsonl --out checkpoints/rehabvlm-hand-ft.pt
+   python export_onnx.py --ckpt checkpoints/rehabvlm-hand-ft.pt
+   ```
+   Batches mix real records (lightly augmented) with synthetic ones so the model keeps its full range. Whole subjects are held out for validation, and the script reports error against the clinician labels for raw tracker geometry, the base model and the fine-tuned model. Records without consent or a subject ID are rejected.
+3. **Ship.** Re-export and redeploy. Fine-tune one model per tracker (e.g. Quest hand tracking vs. a phone webcam), because each tracker has its own bias.
+
+**Pipeline check on simulated data.** There is no real data in this repo, so `scripts/simulate_tracker_bias.py` builds a *simulated* clinic: 30 subjects × 20 hands, where the "tracker" under-reads finger curl by a different amount per subject (MCP ×0.80–0.95, PIP/DIP ×0.65–0.85) and the "goniometer" labels hold the true angles. On 6 held-out simulated subjects:
+
+| Error vs. goniometer labels (mean over fingers) | Before | After 300 fine-tuning steps |
+|---|---|---|
+| Raw tracker geometry | 27.5° | 27.5° |
+| RehabVLM hand model | 25.9° | **13.5°** |
+
+The fine-tuned model learned to correct the tracker's bias on subjects it never saw. As expected, it now over-reads clean synthetic hands (8.2° → 13.7° error), since it has learned to add back the curl this tracker hides. That is why there should be one fine-tuned model per tracker. These are simulated numbers that prove the pipeline works; they are not clinical results.
+
+**Public datasets worth requesting** (each needs its own data-use agreement): KIMORE (Kinect rehab exercises with clinical scores), UI-PRMD (physiotherapy exercises, Vicon + Kinect), Toronto Rehab Stroke Pose (upper-limb stroke patients), and FreiHAND / InterHand2.6M (healthy hands; useful for tracker-noise adaptation).
 
 ## Run it yourself
 
@@ -161,10 +199,12 @@ Exact match with the full reference sentence (every angle in the right 5° bin a
 pip install -r requirements.txt
 python train.py --steps 4000          # body model, ~2 h on a 4-core CPU (trained weights are in checkpoints/)
 python train.py --domain hand --steps 4000 --workers 2 --out checkpoints/rehabvlm-hand.pt
+python train.py --domain wrist --steps 3000 --workers 2 --out checkpoints/rehabvlm-wrist.pt
 python evaluate.py --n 300
 python evaluate.py --ckpt checkpoints/rehabvlm-hand.pt --n 300
 python export_onnx.py                                         # -> web/model/
 python export_onnx.py --ckpt checkpoints/rehabvlm-hand.pt     # -> web/model/hand/
+python export_onnx.py --ckpt checkpoints/rehabvlm-wrist.pt    # -> web/model/wrist/
 cd web && python -m http.server 8000  # open http://localhost:8000
 ```
 
@@ -179,9 +219,10 @@ cd web && python -m http.server 8000  # open http://localhost:8000
 ## Limitations and next steps
 
 * Trained only on synthetic skeletons, so accuracy on real photos depends on the pose estimator and on camera angle. The body model is frontal view only: angles are measured in the image plane.
-* Hand: webcam depth (z) from MediaPipe is noisier than VR hand tracking, so expect better finger readings from Quest/OpenXR hands. MCP hyperextension is reported as flexion. Wrist movement is not covered, because the 21 hand landmarks have no forearm point.
+* Hand: webcam depth (z) from MediaPipe is noisier than VR hand tracking, so expect better finger readings from Quest/OpenXR hands. MCP hyperextension is reported as flexion.
+* Wrist: needs an elbow from body tracking and the correct hand (left/right); the wrong hand swaps flexion and extension. Forearm rotation (pronation/supination) is not covered yet, because it needs the upper arm as well.
 * Closed vocabulary. It answers the supported question types and does not hold open conversation.
-* Next steps: fine-tune on real clinical images/video (for example, with goniometer-labelled ROM), add sagittal-view tasks (knee/hip flexion, gait), feed raw image crops alongside the skeleton, and add temporal tokens for movement quality across video frames.
+* Next steps: collect consented, goniometer-labelled recordings and fine-tune (tools included), add pronation/supination and sagittal-view tasks (knee/hip flexion, gait), feed raw image crops alongside the skeleton, and add temporal tokens for movement quality across video frames.
 
 > **Disclaimer:** research and education project, not a medical device. Do not use it for diagnosis or treatment decisions.
 
@@ -192,12 +233,17 @@ rehabvlm/pose.py    synthetic poses, angle measurement, skeleton rasteriser
 rehabvlm/hand.py    synthetic 3-D hands, finger measurements, 3-view rasteriser
 rehabvlm/text.py    body questions, answer templates, tokenizer
 rehabvlm/hand_text.py  hand questions and answer templates
-rehabvlm/domains.py registry so training/eval/export work for "body" and "hand"
+rehabvlm/wrist.py   synthetic wrists (hand + elbow), wrist angles, forearm-frame rasteriser
+rehabvlm/wrist_text.py wrist questions and answer templates
+rehabvlm/domains.py registry so training/eval/export work for "body", "hand" and "wrist"
+rehabvlm/realdata.py real-data record format, consent/subject checks, subject-wise split
+finetune.py         fine-tune on real records; reports error vs clinician labels
+scripts/simulate_tracker_bias.py  SIMULATED biased-tracker data for testing the pipeline
 rehabvlm/model.py   TinyVLM (ViT encoder + projector + decoder)
 train.py            training on an endless synthetic stream
 evaluate.py         angle error + exact-match evaluation
 export_onnx.py      ONNX export + demo poses for the web app
-web/                static site: demo (index.html, app.js), developer page, model/, sdk/unity/
+web/                static site: demo (index.html, app.js), developer page, collect page, model/, sdk/unity/
 web/core.mjs        body + hand rasterisers, measurements and VLM decoding, shared by the browser and the API
 api/                serverless API: /api/keys, /api/v1/assess, /api/v1/health
 ```
